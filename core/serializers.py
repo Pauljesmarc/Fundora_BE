@@ -78,7 +78,11 @@ class LoginSerializer(serializers.Serializer):
 class DeckSerializer(serializers.ModelSerializer):
     class Meta:
         model = Deck
-        fields = ['id', 'title', 'created_at', 'status']  # Customize as needed
+        fields = ['id', 'company_name', 'tagline', 'logo']
+        extra_kwargs = {
+            'tagline': {'required': False, 'allow_blank': True},
+            'logo': {'required': False, 'allow_null': True}
+        }
 
 class StartupSerializer(serializers.ModelSerializer):
     class Meta:
@@ -102,22 +106,37 @@ class MarketAnalysisSerializer(serializers.ModelSerializer):
             'id',
             'deck',
             'primary_market',
-            'competitive_advantage',
-            'market_size',
-            'growth_rate'
+            'target_audience',
+            'market_growth_rate',
+            'competitive_advantage'
         ]
 
 class FundingAskSerializer(serializers.ModelSerializer):
     class Meta:
         model = FundingAsk
-        fields = ['id', 'deck', 'amount', 'use_of_funds']
+        fields = ['id', 'deck', 'amount', 'usage_description']
 
 class TeamMemberSerializer(serializers.ModelSerializer):
     class Meta:
         model = TeamMember
-        fields = ['id', 'deck', 'name', 'role', 'bio']
+        fields = ['id', 'deck', 'name', 'title']
 
 class FinancialProjectionSerializer(serializers.ModelSerializer):
     class Meta:
         model = FinancialProjection
         fields = ['id', 'deck', 'year', 'revenue', 'profit']
+
+class DeckDetailSerializer(serializers.ModelSerializer):
+    problem = ProblemSerializer(read_only=True)
+    solution = SolutionSerializer(read_only=True)
+    market_analysis = MarketAnalysisSerializer(read_only=True)
+    team_members = TeamMemberSerializer(many=True, read_only=True)
+    financials = FinancialProjectionSerializer(many=True, read_only=True)
+    ask = FundingAskSerializer(read_only=True)
+
+    class Meta:
+        model = Deck
+        fields = [
+            'id', 'company_name', 'tagline', 'logo',
+            'team_members', 'financials', 'ask', 'problem', 'solution', 'market_analysis'
+        ]

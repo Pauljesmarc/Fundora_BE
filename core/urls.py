@@ -1,6 +1,5 @@
 from django.urls import path
 from . import views
-
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -27,6 +26,18 @@ urlpatterns = [
     path('deck/<int:deck_id>/delete/', views.delete_deck.as_view(), name='deck_delete'),
     path('deck/section/<str:section>/', views.deck_builder.as_view(), name='deck_section'),
     path('deck/section-list/', views.section_list.as_view(), name='section_list'),
+
+    #Deck Creation URLS
+    path('deck/cover/', views.create_cover.as_view(), name='create_cover'),
+    path('deck/problem/', views.create_problem.as_view(), name='problem_section'),
+    path('deck/solution/', views.create_solution.as_view(), name='solution_section'),
+    path('deck/market-analysis/', views.create_market_analysis.as_view(), name='market_analysis_section'),
+    path('deck/team/', views.create_team.as_view(), name='team_section'),
+    path('deck/financial/', views.create_financial.as_view(), name='financial_section'),
+    path('deck/ask/', views.create_ask.as_view(), name='ask_section'),
+
+    #Deck list URL
+    path('deck/list/', views.UserDeckListView.as_view(), name='user_deck_list'),
 
     # Module 3 - Startup Registration URLs
     # path('startup-registration/', views.startup_registration, name='startup_registration'),

@@ -78,7 +78,7 @@ class LoginSerializer(serializers.Serializer):
 class DeckSerializer(serializers.ModelSerializer):
     class Meta:
         model = Deck
-        fields = ['id', 'company_name', 'tagline', 'logo']
+        fields = ['id', 'company_name', 'tagline', 'logo', 'created_at']
         extra_kwargs = {
             'tagline': {'required': False, 'allow_blank': True},
             'logo': {'required': False, 'allow_null': True}
@@ -138,5 +138,37 @@ class DeckDetailSerializer(serializers.ModelSerializer):
         model = Deck
         fields = [
             'id', 'company_name', 'tagline', 'logo',
-            'team_members', 'financials', 'ask', 'problem', 'solution', 'market_analysis'
+            'team_members', 'financials', 'ask', 'problem', 'solution', 'market_analysis','created_at'
         ]
+class DeckReportSerializer(serializers.ModelSerializer):
+    problem = serializers.SerializerMethodField()
+    solution = serializers.SerializerMethodField()
+    market_analysis = serializers.SerializerMethodField()
+    financials = FinancialProjectionSerializer(many=True)
+    ask = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Deck
+        fields = ['company_name', 'tagline', 'problem', 'solution', 'market_analysis', 'financials', 'ask','created_at']
+
+    def get_problem(self, obj):
+        return {'description': obj.problem.description} if obj.problem else {}
+
+    def get_solution(self, obj):
+        return {'description': obj.solution.description} if obj.solution else {}
+
+    def get_market_analysis(self, obj):
+        if obj.market_analysis:
+            return {
+                'primary_market': obj.market_analysis.primary_market,
+                'target_audience': obj.market_analysis.target_audience,
+                'market_growth_rate': obj.market_analysis.market_growth_rate,
+                'competitive_advantage': obj.market_analysis.competitive_advantage
+            }
+        return {}
+
+    def get_ask(self, obj):
+        return {
+            'amount': obj.ask.amount,
+            'usage_description': obj.ask.usage_description
+        } if obj.ask else {}

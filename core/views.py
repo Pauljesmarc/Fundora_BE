@@ -34,6 +34,7 @@ import json
 
 # Project-specific
 from .models import (
+    FinancialProjection,
     Startup,
     Watchlist,
     Download,
@@ -94,7 +95,8 @@ from .serializers import (
     FundingAskSerializer,
     TeamMemberSerializer,
     FinancialProjectionSerializer,
-    DeckDetailSerializer
+    DeckDetailSerializer,
+    DeckReportSerializer,
 )
 
 def get_django_user_from_session(request):
@@ -3425,17 +3427,19 @@ class edit_deck(APIView):
 #     return redirect('deck_home')
 
 class delete_deck(APIView):
+    authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated]
 
     def delete(self, request, deck_id):
-        startup_user_id = request.session.get('startup_user_id')
-        if not startup_user_id:
-            return Response({'error': 'Authentication required.'}, status=403)
-
-        deck = get_object_or_404(Deck, id=deck_id, owner_id=startup_user_id)
-        deck.delete()
-
-        return Response({'success': True, 'message': 'Deck deleted successfully.'}, status=204)
+        try:
+            owner = request.user.profile
+            deck = get_object_or_404(Deck, id=deck_id, owner=owner)
+            deck.delete()
+            return Response({'success': True, 'message': 'Deck deleted successfully.'}, status=200)
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return Response({'error': str(e)}, status=500)
 
 # Module 3 - Startup User Views
 # def startup_registration(request):
@@ -4669,15 +4673,13 @@ class create_cover(APIView):
         try:
             deck = Deck.objects.get(id=deck_id, owner=owner)
 
-            # Extract cover fields
             deck_data = {
                 'company_name': request.data.get('company_name'),
                 'tagline': request.data.get('tagline'),
             }
-            
+
             if 'logo' in request.FILES:
                 deck_data['logo'] = request.FILES['logo']
-
 
             serializer = DeckSerializer(deck, data=deck_data, partial=True)
             serializer.is_valid(raise_exception=True)
@@ -4697,6 +4699,24 @@ class create_cover(APIView):
             import traceback
             traceback.print_exc()
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def get(self, request):
+        deck_id = request.query_params.get('deck_id')
+        if not deck_id:
+            return Response({'error': 'Missing deck_id.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            owner = request.user.profile
+            deck = Deck.objects.get(id=deck_id, owner=owner)
+
+            return Response({
+                'company_name': deck.company_name,
+                'tagline': deck.tagline,
+                'logo_url': deck.logo.url if deck.logo else None
+            }, status=status.HTTP_200_OK)
+
+        except Deck.DoesNotExist:
+            return Response({'error': 'Deck not found or unauthorized.'}, status=status.HTTP_404_NOT_FOUND)
         
 class create_problem(APIView):
     authentication_classes = [JWTAuthentication]
@@ -4711,8 +4731,6 @@ class create_problem(APIView):
 
         try:
             deck = Deck.objects.get(id=deck_id, owner=owner)
-
-            # Check if a Problem already exists for this deck
             problem_instance = getattr(deck, 'problem', None)
 
             serializer = ProblemSerializer(
@@ -4736,7 +4754,27 @@ class create_problem(APIView):
         except Exception as e:
             import traceback
             traceback.print_exc()
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)        
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def get(self, request):
+        deck_id = request.query_params.get('deck_id')
+        if not deck_id:
+            return Response({'error': 'Missing deck_id.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            owner = request.user.profile
+            deck = Deck.objects.get(id=deck_id, owner=owner)
+            problem_instance = getattr(deck, 'problem', None)
+
+            if not problem_instance:
+                return Response({'description': ''}, status=status.HTTP_200_OK)
+
+            return Response({
+                'description': problem_instance.description
+            }, status=status.HTTP_200_OK)
+
+        except Deck.DoesNotExist:
+            return Response({'error': 'Deck not found or unauthorized.'}, status=status.HTTP_404_NOT_FOUND)    
         
 class create_solution(APIView):
     authentication_classes = [JWTAuthentication]
@@ -4751,8 +4789,6 @@ class create_solution(APIView):
 
         try:
             deck = Deck.objects.get(id=deck_id, owner=owner)
-
-            # Check if a Solution already exists for this deck
             solution_instance = getattr(deck, 'solution', None)
 
             serializer = SolutionSerializer(
@@ -4777,6 +4813,26 @@ class create_solution(APIView):
             import traceback
             traceback.print_exc()
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def get(self, request):
+        deck_id = request.query_params.get('deck_id')
+        if not deck_id:
+            return Response({'error': 'Missing deck_id.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            owner = request.user.profile
+            deck = Deck.objects.get(id=deck_id, owner=owner)
+            solution_instance = getattr(deck, 'solution', None)
+
+            if not solution_instance:
+                return Response({'description': ''}, status=status.HTTP_200_OK)
+
+            return Response({
+                'description': solution_instance.description
+            }, status=status.HTTP_200_OK)
+
+        except Deck.DoesNotExist:
+            return Response({'error': 'Deck not found or unauthorized.'}, status=status.HTTP_404_NOT_FOUND)
         
 class create_market_analysis(APIView):
     authentication_classes = [JWTAuthentication]
@@ -4791,8 +4847,6 @@ class create_market_analysis(APIView):
 
         try:
             deck = Deck.objects.get(id=deck_id, owner=owner)
-
-            # Check if MarketAnalysis already exists
             market_instance = getattr(deck, 'market_analysis', None)
 
             serializer = MarketAnalysisSerializer(
@@ -4823,6 +4877,35 @@ class create_market_analysis(APIView):
             import traceback
             traceback.print_exc()
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def get(self, request):
+        deck_id = request.query_params.get('deck_id')
+        if not deck_id:
+            return Response({'error': 'Missing deck_id.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            owner = request.user.profile
+            deck = Deck.objects.get(id=deck_id, owner=owner)
+            market_instance = getattr(deck, 'market_analysis', None)
+
+            if not market_instance:
+                return Response({
+                    'primary_market': '',
+                    'target_audience': '',
+                    'market_growth_rate': '',
+                    'competitive_advantage': ''
+                }, status=status.HTTP_200_OK)
+
+            return Response({
+                'primary_market': market_instance.primary_market,
+                'target_audience': market_instance.target_audience,
+                'market_growth_rate': market_instance.market_growth_rate,
+                'competitive_advantage': market_instance.competitive_advantage
+            }, status=status.HTTP_200_OK)
+
+        except Deck.DoesNotExist:
+            return Response({'error': 'Deck not found or unauthorized.'}, status=status.HTTP_404_NOT_FOUND)
+
 class create_team(APIView):
     authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated]
@@ -4865,6 +4948,23 @@ class create_team(APIView):
             import traceback
             traceback.print_exc()
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def get(self, request):
+        deck_id = request.query_params.get('deck_id')
+        if not deck_id:
+            return Response({'error': 'Missing deck_id.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            owner = request.user.profile
+            deck = Deck.objects.get(id=deck_id, owner=owner)
+            members = deck.team_members.all()
+
+            return Response({
+                'members': TeamMemberSerializer(members, many=True).data
+            }, status=status.HTTP_200_OK)
+
+        except Deck.DoesNotExist:
+            return Response({'error': 'Deck not found or unauthorized.'}, status=status.HTTP_404_NOT_FOUND)
         
 class create_financial(APIView):
     authentication_classes = [JWTAuthentication]
@@ -4881,7 +4981,7 @@ class create_financial(APIView):
         try:
             deck = Deck.objects.get(id=deck_id, owner=owner)
 
-            # Clear existing financials (optional)
+            # Clear existing financials
             deck.financials.all().delete()
 
             created = []
@@ -4908,6 +5008,21 @@ class create_financial(APIView):
             import traceback
             traceback.print_exc()
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def get(self, request):
+        deck_id = request.query_params.get('deck_id')
+        if not deck_id:
+            return Response({'error': 'Missing deck_id.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            owner = request.user.profile
+            deck = Deck.objects.get(id=deck_id, owner=owner)
+            projections = deck.financials.all().order_by('year')
+
+            return Response(FinancialProjectionSerializer(projections, many=True).data, status=status.HTTP_200_OK)
+
+        except Deck.DoesNotExist:
+            return Response({'error': 'Deck not found or unauthorized.'}, status=status.HTTP_404_NOT_FOUND)
         
 class create_ask(APIView):
     authentication_classes = [JWTAuthentication]
@@ -4948,6 +5063,30 @@ class create_ask(APIView):
             import traceback
             traceback.print_exc()
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def get(self, request):
+        deck_id = request.query_params.get('deck_id')
+        if not deck_id:
+            return Response({'error': 'Missing deck_id.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            owner = request.user.profile
+            deck = Deck.objects.get(id=deck_id, owner=owner)
+            ask_instance = getattr(deck, 'ask', None)
+
+            if not ask_instance:
+                return Response({
+                    'amount': '',
+                    'usage_description': ''
+                }, status=status.HTTP_200_OK)
+
+            return Response({
+                'amount': ask_instance.amount,
+                'usage_description': ask_instance.usage_description
+            }, status=status.HTTP_200_OK)
+
+        except Deck.DoesNotExist:
+            return Response({'error': 'Deck not found or unauthorized.'}, status=status.HTTP_404_NOT_FOUND)
         
 class UserDeckListView(APIView):
     authentication_classes = [JWTAuthentication]
@@ -4962,3 +5101,31 @@ class UserDeckListView(APIView):
             'count': len(decks),
             'decks': serializer.data
         }, status=status.HTTP_200_OK)
+
+class FinancialsView(APIView):
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        deck_id = request.query_params.get('deck_id')
+        financials = FinancialProjection.objects.filter(deck_id=deck_id).order_by('year')
+        serializer = FinancialProjectionSerializer(financials, many=True)
+        return Response(serializer.data)
+    
+class DeckReportView(APIView):
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, deck_id):  # <-- deck_id comes from the URL
+        try:
+            registered_user = RegisteredUser.objects.get(user=request.user)
+        except RegisteredUser.DoesNotExist:
+            return Response({'detail': 'RegisteredUser not found'}, status=404)
+
+        try:
+            deck = Deck.objects.get(id=deck_id, owner=registered_user)
+        except Deck.DoesNotExist:
+            return Response({'detail': 'Deck not found'}, status=404)
+
+        serializer = DeckReportSerializer(deck)
+        return Response(serializer.data)

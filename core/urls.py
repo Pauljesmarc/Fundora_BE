@@ -38,6 +38,10 @@ urlpatterns = [
 
     #Deck list URL
     path('deck/list/', views.UserDeckListView.as_view(), name='user_deck_list'),
+    #Deck financial list URL
+    path('deck/financial-list/', views.FinancialsView.as_view(), name='user_financial_list'),
+    #Deck report URL
+    path('deck/report/<int:deck_id>', views.DeckReportView.as_view(), name='user_deck_report'),
 
     # Module 3 - Startup Registration URLs
     # path('startup-registration/', views.startup_registration, name='startup_registration'),

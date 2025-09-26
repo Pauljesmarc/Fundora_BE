@@ -3806,9 +3806,6 @@ class add_startup(APIView):
                 total_assets=to_decimal(company_data.get('total_assets')),
                 total_liabilities=to_decimal(company_data.get('total_liabilities')),
                 cash_flow=to_decimal(company_data.get('cash_flow')),
-                team_strength=company_data.get('team_strength', ''),
-                market_position=company_data.get('market_position', ''),
-                brand_reputation=company_data.get('brand_reputation', '')
             )
 
             return Response({

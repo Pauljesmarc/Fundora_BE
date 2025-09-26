@@ -114,6 +114,13 @@ class Startup(models.Model):
     shareholder_equity = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)
     cash_flow = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)
     
+    # Additional Financial Data
+    current_revenue = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)
+    previous_revenue = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)
+    investment_flow = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)
+    financing_flow = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)
+    reporting_period = models.CharField(max_length=50, null=True, blank=True)
+
     # Funding ask amount (from deck builder)
     funding_ask = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)
     

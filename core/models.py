@@ -135,7 +135,7 @@ class Startup(models.Model):
         ordering = ['-created_at']
     
     def __str__(self):
-        return f"{self.company_name} - {self.owner.email}"
+        return f"{self.company_name} - {self.owner.user.email}"
 
 # Analytics tracking models
 class StartupView(models.Model):

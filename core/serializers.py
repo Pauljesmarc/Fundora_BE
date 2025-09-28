@@ -85,9 +85,39 @@ class DeckSerializer(serializers.ModelSerializer):
         }
 
 class StartupSerializer(serializers.ModelSerializer):
+    owner_email = serializers.EmailField(source='owner.email', read_only=True)
+    source_deck_id = serializers.IntegerField(source='source_deck.id', read_only=True)
+
     class Meta:
         model = Startup
-        fields = ['id', 'company_name', 'industry', 'created_at']  # Add more as needed
+        fields = [
+            'id',
+            'company_name',
+            'industry',
+            'company_description',
+            'data_source_confidence',
+            'revenue',
+            'net_income',
+            'total_assets',
+            'total_liabilities',
+            'shareholder_equity',
+            'cash_flow',
+            'funding_ask',
+            'source_deck_id',
+            'team_strength',
+            'market_position',
+            'brand_reputation',
+            'confidence_percentage',
+            'owner_email',
+            'created_at',
+            'updated_at'
+        ]
+        extra_kwargs = {
+            'company_description': {'required': False, 'allow_blank': True},
+            'team_strength': {'required': False, 'allow_blank': True},
+            'market_position': {'required': False, 'allow_blank': True},
+            'brand_reputation': {'required': False, 'allow_blank': True},
+        }
 
 class ProblemSerializer(serializers.ModelSerializer):
     class Meta:

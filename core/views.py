@@ -3879,30 +3879,40 @@ def add_startup(request):
 #         return JsonResponse({'success': False, 'error': str(e)}, status=500)
 
 class delete_startup(APIView):
+    authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated]
 
     def delete(self, request, startup_id):
-        startup_user_id = request.session.get('startup_user_id')
-        user_label = request.session.get('user_label')
-
-        if not startup_user_id or user_label != 'startup':
-            return Response({'success': False, 'error': 'Not authenticated'}, status=status.HTTP_401_UNAUTHORIZED)
-
         try:
-            user = RegisteredUser.objects.get(id=startup_user_id)
-            startup = get_object_or_404(Startup, id=startup_id, owner=user)
+            # Get the authenticated user from JWT token
+            user = request.user
+            
+            # Get the RegisteredUser profile associated with the authenticated user
+            try:
+                user_profile = RegisteredUser.objects.get(user=user)
+            except RegisteredUser.DoesNotExist:
+                return Response({
+                    'success': False, 
+                    'error': 'User profile not found'
+                }, status=status.HTTP_404_NOT_FOUND)
+            
+            # Find the startup owned by this user
+            startup = get_object_or_404(Startup, id=startup_id, owner=user_profile)
             startup_name = startup.company_name
+            
+            # Delete the startup
             startup.delete()
 
             return Response({
                 'success': True,
                 'message': f'Startup "{startup_name}" deleted successfully!'
-            }, status=status.HTTP_204_NO_CONTENT)
+            }, status=status.HTTP_200_OK)
 
-        except RegisteredUser.DoesNotExist:
-            return Response({'success': False, 'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
-            return Response({'success': False, 'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({
+                'success': False, 
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 # def edit_startup(request, startup_id):
 #     """Edit an existing startup"""
@@ -5189,3 +5199,138 @@ class DeckReportView(APIView):
 
         serializer = DeckReportSerializer(deck)
         return Response(serializer.data)
+
+class startup_detail(APIView):
+    """
+    DRF-compliant view to get and update a single startup owned by the authenticated user
+    """
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, startup_id):
+        try:
+            # Get the RegisteredUser profile from the authenticated user
+            profile = RegisteredUser.objects.get(user=request.user)
+        except RegisteredUser.DoesNotExist:
+            return Response({
+                'error': 'User profile not found.',
+                'detail': 'No RegisteredUser profile associated with this user.'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        # Check if user is a startup
+        if profile.label != 'startup':
+            return Response({
+                'error': 'Access denied.',
+                'detail': 'Only startup users can access their startup details.'
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            # Get the startup owned by this user
+            startup = Startup.objects.get(id=startup_id, owner=profile)
+        except Startup.DoesNotExist:
+            return Response({
+                'error': 'Startup not found.',
+                'detail': 'Startup not found or you do not have permission to access it.'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        # Serialize the startup data
+        serializer = StartupSerializer(startup)
+        
+        return Response({
+            'success': True,
+            'startup': serializer.data
+        }, status=status.HTTP_200_OK)
+
+    def put(self, request, startup_id):
+        try:
+            # Get the RegisteredUser profile from the authenticated user
+            profile = RegisteredUser.objects.get(user=request.user)
+        except RegisteredUser.DoesNotExist:
+            return Response({
+                'error': 'User profile not found.',
+                'detail': 'No RegisteredUser profile associated with this user.'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        # Check if user is a startup
+        if profile.label != 'startup':
+            return Response({
+                'error': 'Access denied.',
+                'detail': 'Only startup users can update their startup details.'
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            # Get the startup owned by this user
+            startup = Startup.objects.get(id=startup_id, owner=profile)
+        except Startup.DoesNotExist:
+            return Response({
+                'error': 'Startup not found.',
+                'detail': 'Startup not found or you do not have permission to update it.'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        # Update the startup with the provided data
+        serializer = StartupSerializer(startup, data=request.data, partial=True)
+        
+        if serializer.is_valid():
+            try:
+                updated_startup = serializer.save(updated_at=timezone.now())
+                
+                return Response({
+                    'success': True,
+                    'message': 'Startup information updated successfully.',
+                    'startup': StartupSerializer(updated_startup).data
+                }, status=status.HTTP_200_OK)
+                
+            except Exception as e:
+                return Response({
+                    'success': False,
+                    'error': f'Failed to update startup: {str(e)}'
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        else:
+            return Response({
+                'success': False,
+                'error': 'Validation failed.',
+                'errors': serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+    def delete(self, request, startup_id):
+        """
+        Delete a startup owned by the authenticated user
+        """
+        try:
+            # Get the RegisteredUser profile from the authenticated user
+            profile = RegisteredUser.objects.get(user=request.user)
+        except RegisteredUser.DoesNotExist:
+            return Response({
+                'success': False,
+                'error': 'User profile not found.',
+                'detail': 'No RegisteredUser profile associated with this user.'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        # Check if user is a startup
+        if profile.label != 'startup':
+            return Response({
+                'success': False,
+                'error': 'Access denied.',
+                'detail': 'Only startup users can delete their startup details.'
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            # Get the startup owned by this user
+            startup = Startup.objects.get(id=startup_id, owner=profile)
+        except Startup.DoesNotExist:
+            return Response({
+                'success': False,
+                'error': 'Startup not found.',
+                'detail': 'Startup not found or you do not have permission to delete it.'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        # Store startup name for response message
+        startup_name = startup.company_name
+        
+        # Delete the startup
+        startup.delete()
+
+        return Response({
+            'success': True,
+            'message': f'Startup "{startup_name}" deleted successfully!'
+        }, status=status.HTTP_200_OK)

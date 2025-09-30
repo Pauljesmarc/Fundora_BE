@@ -57,6 +57,7 @@ urlpatterns = [
     
     path('logout/', views.user_logout.as_view(), name='user_logout'),
     path('startups/', views.added_startups.as_view(), name='added_startups'),
+    path('startup/<int:startup_id>/', views.startup_detail.as_view(), name='startup_detail'),
 
 
     # Company Information Form and Health Report

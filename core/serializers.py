@@ -102,6 +102,11 @@ class StartupSerializer(serializers.ModelSerializer):
             'total_liabilities',
             'shareholder_equity',
             'cash_flow',
+            'current_revenue',           # Missing field
+            'previous_revenue',          # Missing field
+            'investment_flow',           # Missing field
+            'financing_flow',            # Missing field
+            'reporting_period',          # Missing field
             'funding_ask',
             'source_deck_id',
             'team_strength',
@@ -117,6 +122,11 @@ class StartupSerializer(serializers.ModelSerializer):
             'team_strength': {'required': False, 'allow_blank': True},
             'market_position': {'required': False, 'allow_blank': True},
             'brand_reputation': {'required': False, 'allow_blank': True},
+            'current_revenue': {'required': False, 'allow_null': True},
+            'previous_revenue': {'required': False, 'allow_null': True},
+            'investment_flow': {'required': False, 'allow_null': True},
+            'financing_flow': {'required': False, 'allow_null': True},
+            'reporting_period': {'required': False, 'allow_blank': True},
         }
 
 class ProblemSerializer(serializers.ModelSerializer):

@@ -1,0 +1,762 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ csrf_token }}">
+    <title>Modern Company Profile Form</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f1f5f9; /* slate-100 */
+            height: 100vh;
+            margin: 0;
+        }
+        .form-input-modern {
+            background-color: #ffffff; /* white */
+            border: 1px solid #cbd5e1; /* slate-300 */
+            transition: all 0.2s ease-in-out;
+        }
+        .form-input-modern:focus {
+            --tw-ring-color: #2563eb; /* blue-600 */
+            border-color: #2563eb;
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2);
+        }
+        .form-input-modern:hover {
+            border-color: #94a3b8; /* slate-400 */
+        }
+        .dynamic-tooltip {
+            visibility: hidden;
+            background-color: #0f172a; /* slate-900 */
+            color: #fff;
+            text-align: center;
+            border-radius: 6px;
+            padding: 8px 12px;
+            position: fixed;
+            z-index: 100;
+            opacity: 0;
+            transition: opacity 0.3s;
+            max-width: 220px;
+            font-size: 0.875rem;
+            pointer-events: none;
+        }
+        .dynamic-tooltip.visible {
+            visibility: visible;
+            opacity: 1;
+        }
+        .dynamic-tooltip::after {
+            content: "";
+            position: absolute;
+            border-width: 5px;
+            border-style: solid;
+        }
+        .tooltip-top::after {
+           top: 100%;
+           left: 50%;
+           margin-left: -5px;
+           border-color: #0f172a transparent transparent transparent;
+        }
+    </style>
+</head>
+<body class="bg-slate-100 flex flex-col h-screen">
+
+    <!-- Header -->
+    <header class="bg-white shadow-sm border-b border-slate-200 sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between items-center h-16">
+                <div class="flex items-center space-x-3">
+                    <div class="bg-blue-600 p-2 rounded-lg">
+                        <svg class="h-6 w-6 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                           <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 18L9 11.25l4.306 4.307a11.95 11.95 0 015.814-5.519l2.74-1.22m0 0l-5.94-2.28m5.94 2.28l-2.28 5.941" />
+                        </svg>
+                    </div>
+                    <span class="text-2xl font-bold text-slate-800 tracking-tight">Fundora</span>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <span class="text-slate-600 text-sm">
+                        Welcome, <span class="font-semibold text-slate-800" id="user-email">Loading...</span>
+                    </span>
+                     <img class="h-9 w-9 rounded-full object-cover" src="https://i.pravatar.cc/150?u=a042581f4e29026704d" alt="User Avatar">
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="flex-1 min-h-0 py-4">
+        <div class="max-w-10xl mx-4 px-8 sm:px-10 lg:px-12 h-full border-2 border-gray-300 rounded-lg">
+            <form id="companyForm" novalidate class="bg-white rounded-2xl shadow-lg p-6 sm:p-8 h-full">
+                <div class="grid lg:grid-cols-5 gap-8">
+
+                    <!-- Left Column: Core Info -->
+                    <div class="lg:col-span-2">
+                        <div class="flex items-center gap-3 mb-6">
+                            <i data-lucide="building-2" class="w-8 h-8 text-blue-600"></i>
+                            <h2 class="text-2xl font-bold text-slate-800">Company Profile</h2>
+                        </div>
+                        <div class="space-y-6">
+                            <div>
+                                <label for="company-name" class="flex items-center text-sm font-medium text-slate-700 mb-1.5">Company Name
+                                    <span class="tooltip-trigger ml-1.5" data-tooltip-text="Enter the full legal name of the company being analyzed.">
+                                        <i data-lucide="info" class="w-4 h-4 text-slate-400 hover:text-slate-600"></i>
+                                    </span>
+                                </label>
+                                <input type="text" name="company-name" id="company-name" class="w-full px-4 py-2.5 rounded-lg border focus:ring-2 outline-none form-input-modern text-sm" placeholder="e.g., Acme Corporation" required>
+                            </div>
+                            <div>
+                                <label for="industry" class="flex items-center text-sm font-medium text-slate-700 mb-1.5">Industry
+                                    <span class="tooltip-trigger ml-1.5" data-tooltip-text="Select the primary industry sector in which the company operates.">
+                                        <i data-lucide="info" class="w-4 h-4 text-slate-400 hover:text-slate-600"></i>
+                                    </span>
+                                </label>
+                                <select id="industry" name="industry" class="w-full px-4 py-2.5 rounded-lg border focus:ring-2 outline-none appearance-none form-input-modern text-sm" required>
+                                    <option value="" disabled selected>Select an industry</option>
+                                    <option value="Technology">Technology</option>
+                                    <option value="Finance">Finance</option>
+                                    <option value="Healthcare">Healthcare</option>
+                                    <option value="Retail">Retail</option>
+                                    <option value="Manufacturing">Manufacturing</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label for="company-description" class="flex items-center text-sm font-medium text-slate-700 mb-1.5">Company Description
+                                    <span class="tooltip-trigger ml-1.5" data-tooltip-text="Describe the company's core business, products/services, target market, and competitive landscape.">
+                                        <i data-lucide="info" class="w-4 h-4 text-slate-400 hover:text-slate-600"></i>
+                                    </span>
+                                </label>
+                                <textarea id="company-description" name="company-description" rows="8" class="w-full px-4 py-2.5 rounded-lg border focus:ring-2 outline-none form-input-modern text-sm resize-none" placeholder="Provide a brief overview of the company, its mission, and its core products or services."></textarea>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Right Column: Financials & Actions -->
+                    <div class="lg:col-span-3">
+                        <div class="flex items-center gap-3 mb-6">
+                             <i data-lucide="line-chart" class="w-8 h-8 text-blue-600"></i>
+                            <h2 class="text-2xl font-bold text-slate-800">Financial Metrics</h2>
+                        </div>
+                        <div class="grid grid-cols-2 gap-6">
+
+                            <!-- Income Statement -->
+                            <div class="bg-slate-50 border border-slate-200 rounded-xl p-4">
+                                <h3 class="font-semibold text-slate-800 mb-4 text-center">Income Statement</h3>
+                                <div class="space-y-4">
+                                    <div>
+                                        <label for="income-period" class="flex items-center text-sm font-medium text-slate-600">Reporting Period
+                                            <span class="tooltip-trigger ml-1.5" data-tooltip-text="Select the time frame for the income data (e.g., Yearly, Quarterly).">
+                                                <i data-lucide="info" class="w-4 h-4 text-slate-400 hover:text-slate-600"></i>
+                                            </span>
+                                        </label>
+                                        <select id="income-period" name="income-period" class="mt-1 w-full p-2.5 border rounded-md form-input-modern text-sm">
+                                            <option value="yearly" selected>Yearly</option>
+                                            <option value="quarterly">Quarterly</option>
+                                            <option value="monthly">Monthly</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label for="previous-revenue" class="flex items-center text-sm font-medium text-slate-600">Prior Period Revenue (₱)
+                                            <span class="tooltip-trigger ml-1.5" data-tooltip-text="Enter the total revenue from the prior fiscal period.">
+                                                <i data-lucide="info" class="w-4 h-4 text-slate-400 hover:text-slate-600"></i>
+                                            </span>
+                                        </label>
+                                        <input type="number" name="previous-revenue" id="previous-revenue" class="mt-1 w-full p-2.5 border rounded-md form-input-modern text-sm" placeholder="800,000">
+                                    </div>
+                                    <div>
+                                        <label for="current-revenue" class="flex items-center text-sm font-medium text-slate-600">Current Period Revenue (₱)
+                                            <span class="tooltip-trigger ml-1.5" data-tooltip-text="Enter the total revenue from the most recent fiscal period.">
+                                                <i data-lucide="info" class="w-4 h-4 text-slate-400 hover:text-slate-600"></i>
+                                            </span>
+                                        </label>
+                                        <input type="number" name="current-revenue" id="current-revenue" class="mt-1 w-full p-2.5 border rounded-md form-input-modern text-sm" placeholder="1,000,000">
+                                    </div>
+                                    <div>
+                                        <label for="net-income" class="flex items-center text-sm font-medium text-slate-600">Current Period Net Income (₱)
+                                            <span class="tooltip-trigger ml-1.5" data-tooltip-text="Profit after all expenses and taxes have been deducted.">
+                                                <i data-lucide="info" class="w-4 h-4 text-slate-400 hover:text-slate-600"></i>
+                                            </span>
+                                        </label>
+                                        <input type="number" name="net-income" id="net-income" class="mt-1 w-full p-2.5 border rounded-md form-input-modern text-sm" placeholder="150,000">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Balance Sheet -->
+                            <div class="bg-slate-50 border border-slate-200 rounded-xl p-4">
+                                <h3 class="font-semibold text-slate-800 mb-4 text-center">Balance Sheet</h3>
+                                <div class="space-y-4">
+                                    <div>
+                                        <label for="total-assets" class="flex items-center text-sm font-medium text-slate-600">Total Assets (₱)
+                                            <span class="tooltip-trigger ml-1.5" data-tooltip-text="The total value of all assets owned by the company.">
+                                                <i data-lucide="info" class="w-4 h-4 text-slate-400 hover:text-slate-600"></i>
+                                            </span>
+                                        </label>
+                                        <input type="number" name="total-assets" id="total-assets" class="mt-1 w-full p-2.5 border rounded-md form-input-modern text-sm" placeholder="2,500,000">
+                                    </div>
+                                    <div>
+                                        <label for="total-liabilities" class="flex items-center text-sm font-medium text-slate-600">Total Liabilities (₱)
+                                            <span class="tooltip-trigger ml-1.5" data-tooltip-text="The total amount of debt and obligations owed by the company.">
+                                                 <i data-lucide="info" class="w-4 h-4 text-slate-400 hover:text-slate-600"></i>
+                                            </span>
+                                        </label>
+                                        <input type="number" name="total-liabilities" id="total-liabilities" class="mt-1 w-full p-2.5 border rounded-md form-input-modern text-sm" placeholder="800,000">
+                                    </div>
+                                    <div>
+                                        <label for="shareholder-equity" class="text-sm font-medium text-slate-600">Shareholder Equity (₱)</label>
+                                        <input type="text" name="shareholder-equity" id="shareholder-equity" class="mt-1 w-full p-2.5 bg-slate-200 border-slate-300 rounded-md text-slate-600 font-medium text-sm" placeholder="Auto-calculated" disabled>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Cash Flow -->
+                            <div class="bg-slate-50 border border-slate-200 rounded-xl p-4">
+                                <h3 class="font-semibold text-slate-800 mb-4 text-center">Cash Flow</h3>
+                                <div class="space-y-4">
+                                    <div>
+                                        <label for="cash-flow" class="flex items-center text-sm font-medium text-slate-600">Operations Cash Flow (₱)
+                                            <span class="tooltip-trigger ml-1.5" data-tooltip-text="Cash generated from normal business operations.">
+                                                <i data-lucide="info" class="w-4 h-4 text-slate-400 hover:text-slate-600"></i>
+                                            </span>
+                                        </label>
+                                        <input type="number" name="cash-flow" id="cash-flow" class="mt-1 w-full p-2.5 border rounded-md form-input-modern text-sm" placeholder="200,000">
+                                    </div>
+                                    <div>
+                                        <label for="investment-flow" class="flex items-center text-sm font-medium text-slate-600">Investment Cash Flow (₱)
+                                            <span class="tooltip-trigger ml-1.5" data-tooltip-text="Cash used for or generated from investments (e.g., purchase of assets). Can be negative.">
+                                                <i data-lucide="info" class="w-4 h-4 text-slate-400 hover:text-slate-600"></i>
+                                            </span>
+                                        </label>
+                                        <input type="number" name="investment-flow" id="investment-flow" class="mt-1 w-full p-2.5 border rounded-md form-input-modern text-sm" placeholder="-50,000">
+                                    </div>
+                                    <div>
+                                        <label for="financing-flow" class="flex items-center text-sm font-medium text-slate-600">Financing Cash Flow (₱)
+                                            <span class="tooltip-trigger ml-1.5" data-tooltip-text="Cash flow between the company and its owners/creditors (e.g., issuing stock, paying dividends).">
+                                                <i data-lucide="info" class="w-4 h-4 text-slate-400 hover:text-slate-600"></i>
+                                            </span>
+                                        </label>
+                                        <input type="number" name="financing-flow" id="financing-flow" class="mt-1 w-full p-2.5 border rounded-md form-input-modern text-sm" placeholder="100,000">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Actions & Confidence -->
+                            <div class="bg-slate-50 border border-slate-200 rounded-xl p-4 flex flex-col justify-between">
+                                 <div>
+                                    <h3 class="font-semibold text-slate-800 mb-4 text-center">Actions</h3>
+                                    <div>
+                                        <label class="block text-sm font-medium text-slate-700 mb-2">Confidence Level</label>
+                                        <div class="w-full bg-slate-200 rounded-full h-2.5">
+                                            <div id="completeness-bar" class="bg-blue-600 h-2.5 rounded-full transition-all duration-300" style="width: 0%"></div>
+                                        </div>
+                                        <p id="completeness-text" class="text-sm text-slate-500 mt-2 text-center font-medium">Please fill the form</p>
+                                        <input type="hidden" id="data-completeness-level" name="data-completeness-level" value="Low">
+                                    </div>
+                                 </div>
+                                <div class="mt-6 space-y-3">
+                                    <button type="submit" class="w-full flex items-center justify-center gap-2 bg-blue-600 text-white font-semibold py-3 px-4 rounded-lg shadow-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-all duration-200">
+                                        <i data-lucide="save" class="w-4 h-4"></i>
+                                        Save & Generate Report
+                                    </button>
+                                    <button type="button" onclick="window.history.back()" class="w-full bg-white text-slate-700 font-semibold py-3 px-4 rounded-lg hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-slate-300 transition-all duration-200 border border-slate-300">
+                                        Cancel
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </main>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            lucide.createIcons();
+
+            const form = document.getElementById('companyForm');
+            const totalAssetsInput = document.getElementById('total-assets');
+            const totalLiabilitiesInput = document.getElementById('total-liabilities');
+            const shareholderEquityInput = document.getElementById('shareholder-equity');
+            const completenessBar = document.getElementById('completeness-bar');
+            const completenessText = document.getElementById('completeness-text');
+            const completenessHiddenInput = document.getElementById('data-completeness-level');
+            let tooltipElement;
+
+            // --- Load User Information ---
+            async function loadUserInfo() {
+                const token = localStorage.getItem('authToken');
+                const userEmailElement = document.getElementById('user-email');
+
+                if (!token) {
+                    userEmailElement.textContent = 'No user logged in';
+                    userEmailElement.className = 'font-semibold text-red-600';
+                    return;
+                }
+
+                // Get stored user data from login
+                const storedUserData = localStorage.getItem('userData');
+                if (storedUserData) {
+                    try {
+                        const user = JSON.parse(storedUserData);
+                        userEmailElement.textContent = user.email || 'Unknown user';
+                        userEmailElement.className = 'font-semibold text-green-600';
+                        return;
+                    } catch (error) {
+                        console.error('Error parsing user data:', error);
+                    }
+                }
+
+                // If no stored user data, show token exists but no user info
+                userEmailElement.textContent = 'Token found, no user info';
+                userEmailElement.className = 'font-semibold text-yellow-600';
+            }
+
+            // Load user info on page load
+            loadUserInfo();
+
+            // --- Auto-calculation for Shareholder Equity ---
+            function calculateEquity() {
+                const assets = parseFloat(totalAssetsInput.value) || 0;
+                const liabilities = parseFloat(totalLiabilitiesInput.value) || 0;
+                const equity = assets - liabilities;
+                
+                if (equity > 0) {
+                    shareholderEquityInput.value = new Intl.NumberFormat('en-PH', { 
+                        style: 'currency', 
+                        currency: 'PHP' 
+                    }).format(equity);
+                } else {
+                    shareholderEquityInput.value = '₱ 0.00';
+                }
+            }
+            totalAssetsInput.addEventListener('input', calculateEquity);
+            totalLiabilitiesInput.addEventListener('input', calculateEquity);
+
+            // --- Dynamic Tooltip Logic ---
+            function createTooltip() {
+                if (!tooltipElement) {
+                    tooltipElement = document.createElement('div');
+                    tooltipElement.className = 'dynamic-tooltip tooltip-top';
+                    document.body.appendChild(tooltipElement);
+                }
+            }
+            
+            document.querySelectorAll('.tooltip-trigger').forEach(trigger => {
+                trigger.addEventListener('mouseenter', (e) => {
+                    createTooltip();
+                    const text = trigger.getAttribute('data-tooltip-text');
+                    tooltipElement.textContent = text;
+                    const rect = trigger.getBoundingClientRect();
+                    
+                    tooltipElement.classList.add('visible'); // Make it visible to calculate size
+                    const tooltipRect = tooltipElement.getBoundingClientRect();
+
+                    let top = rect.top - tooltipRect.height - 8; // 8px gap
+                    let left = rect.left + (rect.width / 2) - (tooltipRect.width / 2);
+
+                    // Boundary checks
+                    if (left < 0) left = 5;
+                    if (top < 0) {
+                        top = rect.bottom + 8;
+                        // Adjust arrow direction if needed (more complex)
+                    }
+
+                    tooltipElement.style.top = `${top}px`;
+                    tooltipElement.style.left = `${left}px`;
+                });
+                trigger.addEventListener('mouseleave', () => {
+                    if (tooltipElement) {
+                        tooltipElement.classList.remove('visible');
+                    }
+                });
+            });
+
+            // --- Data Completeness Calculation ---
+            const formInputs = Array.from(form.querySelectorAll('input[type="text"], input[type="number"], select, textarea')).filter(el => !el.disabled);
+            const totalFields = formInputs.length;
+
+            function updateCompleteness() {
+                let filledFields = 0;
+                formInputs.forEach(input => {
+                    if ((input.type === 'select-one' && input.value !== "") || (input.type !== 'select-one' && input.value && input.value.trim() !== '')) {
+                         filledFields++;
+                    }
+                });
+
+                const percentage = totalFields > 0 ? (filledFields / totalFields) * 100 : 0;
+                completenessBar.style.width = percentage + '%';
+                
+                let level = 'Low';
+                let barColor = 'bg-red-500';
+
+                if (percentage > 75) {
+                    level = 'High';
+                    barColor = 'bg-green-500';
+                    completenessText.textContent = `High Confidence (${Math.round(percentage)}%)`;
+                } else if (percentage > 40) {
+                    level = 'Medium';
+                    barColor = 'bg-yellow-500';
+                    completenessText.textContent = `Medium Confidence (${Math.round(percentage)}%)`;
+                } else {
+                    level = 'Low';
+                    barColor = 'bg-red-500';
+                    if(filledFields > 0) {
+                        completenessText.textContent = `Low Confidence (${Math.round(percentage)}%)`;
+                    } else {
+                        completenessText.textContent = `Please fill the form`;
+                    }
+                }
+                
+                completenessHiddenInput.value = level;
+                completenessBar.className = `h-2.5 rounded-full transition-all duration-300 ${barColor}`;
+            }
+
+            form.addEventListener('input', updateCompleteness);
+
+            // --- Company Data Object Constructor ---
+            function createCompanyDataObject() {
+                // Helper function to parse numeric values
+                function parseNumericValue(value) {
+                    if (!value || value.trim() === '') return null;
+                    // Remove currency symbols, commas, and spaces
+                    const cleaned = value.toString().replace(/[₱,\s]/g, '');
+                    const parsed = parseFloat(cleaned);
+                    return isNaN(parsed) ? null : parsed;
+                }
+
+                // Calculate shareholder equity from the input values (not the formatted display)
+                const assets = parseNumericValue(document.getElementById('total-assets').value);
+                const liabilities = parseNumericValue(document.getElementById('total-liabilities').value);
+                const calculatedEquity = (assets && liabilities) ? assets - liabilities : null;
+
+                // Calculate actual confidence percentage from form completeness
+                const formInputs = Array.from(form.querySelectorAll('input[type="text"], input[type="number"], select, textarea')).filter(el => !el.disabled);
+                const totalFields = formInputs.length;
+                let filledFields = 0;
+                
+                formInputs.forEach(input => {
+                    if ((input.type === 'select-one' && input.value !== "") || (input.type !== 'select-one' && input.value && input.value.trim() !== '')) {
+                         filledFields++;
+                    }
+                });
+                
+                const actualPercentage = totalFields > 0 ? Math.round((filledFields / totalFields) * 100) : 0;
+                
+                // Determine confidence level based on actual percentage (same logic as UI)
+                let confidenceLevel = 'Low'; // Default
+                let confidencePercentage = actualPercentage; // Use the actual calculated percentage
+                
+                if (actualPercentage > 75) {
+                    confidenceLevel = 'High';
+                } else if (actualPercentage > 40) {
+                    confidenceLevel = 'Medium';
+                } else {
+                    confidenceLevel = 'Low';
+                }
+
+                const companyData = {
+                    // Basic Information (match DRF serializer field names exactly)
+                    company_name: document.getElementById('company-name').value.trim(),
+                    industry: document.getElementById('industry').value,
+                    company_description: document.getElementById('company-description').value.trim(),
+                    
+                    // Financial Data (match DRF serializer field names exactly)
+                    revenue: parseNumericValue(document.getElementById('current-revenue').value),
+                    net_income: parseNumericValue(document.getElementById('net-income').value),
+                    total_assets: parseNumericValue(document.getElementById('total-assets').value),
+                    total_liabilities: parseNumericValue(document.getElementById('total-liabilities').value),
+                    shareholder_equity: calculatedEquity,
+                    cash_flow: parseNumericValue(document.getElementById('cash-flow').value),
+                    
+                    // Additional financial fields (DRF expects these)
+                    current_revenue: parseNumericValue(document.getElementById('current-revenue').value),
+                    previous_revenue: parseNumericValue(document.getElementById('previous-revenue').value),
+                    investment_flow: parseNumericValue(document.getElementById('investment-flow').value),
+                    financing_flow: parseNumericValue(document.getElementById('financing-flow').value),
+                    reporting_period: document.getElementById('income-period').value || 'yearly',
+                    
+                    // Business Metrics (DRF expects these - optional fields)
+                    team_strength: '',
+                    market_position: '',
+                    brand_reputation: '',
+                    
+                    // Confidence Metrics (DRF expects these - calculated from form)
+                    data_source_confidence: confidenceLevel,
+                    confidence_percentage: confidencePercentage,
+                    
+                    // DRF optional fields
+                    funding_ask: null // Set to null for DRF compatibility
+                };
+                
+                // Debug output to console
+                console.log('=== FORM DATA BEING SENT ===');
+                console.log('Confidence Metrics:');
+                console.log('  UI Display Percentage:', actualPercentage + '%');
+                console.log('  Confidence Level:', confidenceLevel);
+                console.log('  Confidence Percentage (sent to API):', confidencePercentage + '%');
+                console.log('Income Statement Fields:');
+                console.log('  Current Revenue:', companyData.current_revenue);
+                console.log('  Previous Revenue:', companyData.previous_revenue);
+                console.log('  Net Income:', companyData.net_income);
+                console.log('  Reporting Period:', companyData.reporting_period);
+                console.log('Balance Sheet Fields:');
+                console.log('  Total Assets:', companyData.total_assets);
+                console.log('  Total Liabilities:', companyData.total_liabilities);
+                console.log('  Shareholder Equity:', companyData.shareholder_equity);
+                console.log('Cash Flow Fields:');
+                console.log('  Operations Cash Flow:', companyData.cash_flow);
+                console.log('  Investment Flow:', companyData.investment_flow);
+                console.log('  Financing Flow:', companyData.financing_flow);
+                console.log('=============================');
+                
+                return companyData;
+            }
+
+            // --- Function to Check Object Field Storage ---
+            function validateObjectFields(companyData) {
+                console.log('=== COMPANY DATA OBJECT VALIDATION ===');
+                
+                const validationReport = {
+                    totalFields: 0,
+                    filledFields: 0,
+                    emptyFields: 0,
+                    fieldDetails: {},
+                    isValid: false
+                };
+
+                // Define field categories for better organization
+                const fieldCategories = {
+                    basic: ['company_name', 'industry', 'company_description'],
+                    financial: ['revenue', 'net_income', 'total_assets', 'total_liabilities', 'shareholder_equity', 'cash_flow', 'current_revenue', 'previous_revenue', 'investment_flow', 'financing_flow'],
+                    business: ['team_strength', 'market_position', 'brand_reputation'],
+                    confidence: ['data_source_confidence', 'confidence_percentage'],
+                    other: ['reporting_period', 'funding_ask']
+                };
+
+                // Validate each field
+                Object.keys(companyData).forEach(field => {
+                    validationReport.totalFields++;
+                    const value = companyData[field];
+                    const isEmpty = value === null || value === undefined || value === '';
+                    
+                    if (!isEmpty) {
+                        validationReport.filledFields++;
+                    } else {
+                        validationReport.emptyFields++;
+                    }
+
+                    validationReport.fieldDetails[field] = {
+                        value: value,
+                        isEmpty: isEmpty,
+                        type: typeof value,
+                        length: value ? value.toString().length : 0
+                    };
+                });
+
+                // Check if minimum required fields are filled
+                const requiredFields = ['company_name', 'industry'];
+                const requiredFieldsFilled = requiredFields.every(field => 
+                    companyData[field] && companyData[field].trim() !== ''
+                );
+
+                validationReport.isValid = requiredFieldsFilled;
+
+                // Console output for debugging
+                console.log('📊 Validation Summary:');
+                console.log(`   Total Fields: ${validationReport.totalFields}`);
+                console.log(`   Filled Fields: ${validationReport.filledFields}`);
+                console.log(`   Empty Fields: ${validationReport.emptyFields}`);
+                console.log(`   Form Valid: ${validationReport.isValid ? '✅ Yes' : '❌ No'}`);
+                
+                console.log('\n📋 Field Details:');
+                Object.entries(fieldCategories).forEach(([category, fields]) => {
+                    console.log(`\n${category.toUpperCase()} FIELDS:`);
+                    fields.forEach(field => {
+                        const detail = validationReport.fieldDetails[field];
+                        if (detail) {
+                            const status = detail.isEmpty ? '❌ Empty' : '✅ Filled';
+                            console.log(`   ${field}: ${status} | Value: "${detail.value}" | Type: ${detail.type}`);
+                        }
+                    });
+                });
+
+                console.log('\n🔍 Raw Object Data:');
+                console.log(JSON.stringify(companyData, null, 2));
+                
+                return validationReport;
+            }
+
+
+
+            // --- API Call Function ---
+            async function submitStartupData(companyData) {
+                try {
+                    // Get auth token
+                    const token = localStorage.getItem('authToken');
+                    
+                    if (!token) {
+                        showErrorMessage('Authentication required. Please log in again.');
+                        return;
+                    }
+                    
+                    // Show loading state
+                    const submitButton = form.querySelector('button[type="submit"]');
+                    const originalText = submitButton.innerHTML;
+                    submitButton.disabled = true;
+                    submitButton.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> Saving...';
+                    
+                    // Make DRF-compliant API call
+                    const response = await fetch('http://127.0.0.1:8000/api/startup/add/', {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${token}`,
+                            'Content-Type': 'application/json',
+                            'Accept': 'application/json',
+                        },
+                        body: JSON.stringify(companyData)
+                    });
+                    
+                    // Handle response based on DRF standards
+                    if (!response.ok) {
+                        const errorData = await response.json();
+                        
+                        // Handle DRF validation errors
+                        if (response.status === 400 && errorData.errors) {
+                            const errorMessages = Object.entries(errorData.errors)
+                                .map(([field, messages]) => `${field}: ${Array.isArray(messages) ? messages.join(', ') : messages}`)
+                                .join('\n');
+                            showErrorMessage(`Validation errors:\n${errorMessages}`);
+                        } else if (response.status === 401) {
+                            showErrorMessage('Authentication failed. Please log in again.');
+                            // Optionally redirect to login
+                        } else if (response.status === 403) {
+                            showErrorMessage('Access denied. Only startup users can submit company information.');
+                        } else {
+                            showErrorMessage(errorData.error || errorData.message || 'An error occurred while saving the startup data.');
+                        }
+                        return;
+                    }
+                    
+                    const result = await response.json();
+                    
+                    // Handle DRF success response
+                    if (result.success) {
+                        // Success handling with DRF response structure
+                        showSuccessMessage(result.message, result.startup_id);
+                        
+                        // Log the saved data for verification
+                        console.log('=== STARTUP SAVED SUCCESSFULLY ===');
+                        console.log('Startup ID:', result.startup_id);
+                        console.log('Saved Data:', result.data);
+                        console.log('================================');
+                        
+                        // Optionally redirect to another page after success
+                        // setTimeout(() => {
+                        //     window.location.href = `/dashboard/`;
+                        // }, 2000);
+                    } else {
+                        // Handle non-success response
+                        showErrorMessage(result.error || 'An unexpected error occurred.');
+                    }
+                    
+                } catch (error) {
+                    console.error('API Error:', error);
+                    
+                    if (error.name === 'TypeError' && error.message.includes('fetch')) {
+                        showErrorMessage('Network error. Please check your connection and ensure the server is running.');
+                    } else {
+                        showErrorMessage('An unexpected error occurred. Please try again.');
+                    }
+                } finally {
+                    // Reset button state
+                    const submitButton = form.querySelector('button[type="submit"]');
+                    if (submitButton) {
+                        submitButton.disabled = false;
+                        submitButton.innerHTML = originalText;
+                        lucide.createIcons(); // Recreate icons after innerHTML change
+                    }
+                }
+            }
+
+            function showSuccessMessage(message, startupId) {
+                // Create success notification
+                const notification = document.createElement('div');
+                notification.className = 'fixed top-4 right-4 bg-green-500 text-white p-4 rounded-lg shadow-lg z-50 max-w-sm';
+                notification.innerHTML = `
+                    <div class="flex items-center gap-2">
+                        <i data-lucide="check-circle" class="w-5 h-5"></i>
+                        <div>
+                            <div class="font-semibold">Success!</div>
+                            <div class="text-sm">${message}</div>
+                            ${startupId ? `<div class="text-sm mt-1">Startup ID: ${startupId}</div>` : ''}
+                        </div>
+                    </div>
+                `;
+                document.body.appendChild(notification);
+                lucide.createIcons();
+                
+                // Auto remove after 5 seconds
+                setTimeout(() => {
+                    notification.remove();
+                }, 5000);
+            }
+
+            function showErrorMessage(message) {
+                // Create error notification
+                const notification = document.createElement('div');
+                notification.className = 'fixed top-4 right-4 bg-red-500 text-white p-4 rounded-lg shadow-lg z-50 max-w-sm';
+                notification.innerHTML = `
+                    <div class="flex items-center gap-2">
+                        <i data-lucide="alert-circle" class="w-5 h-5"></i>
+                        <div>
+                            <div class="font-semibold">Error!</div>
+                            <div class="text-sm">${message}</div>
+                        </div>
+                    </div>
+                `;
+                document.body.appendChild(notification);
+                lucide.createIcons();
+                
+                // Auto remove after 7 seconds
+                setTimeout(() => {
+                    notification.remove();
+                }, 7000);
+            }
+
+            // --- Form Submission Handler ---
+            form.addEventListener('submit', function(e) {
+                e.preventDefault();
+                
+                if (!form.checkValidity()) {
+                    form.reportValidity();
+                    return;
+                }
+                
+                // Create company data object
+                const companyData = createCompanyDataObject();
+                
+                // Validate and check object fields
+                const validation = validateObjectFields(companyData);
+                
+                // Check if minimum required fields are filled
+                if (!validation.isValid) {
+                    showErrorMessage('Please fill in all required fields (Company Name and Industry).');
+                    return;
+                }
+                
+                // Submit to API
+                submitStartupData(companyData);
+            });
+
+            // --- Initial State Setup ---
+            createTooltip();
+            updateCompleteness();
+        });
+    </script>
+</body>
+</html>
+
+

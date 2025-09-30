@@ -55,6 +55,19 @@ MIDDLEWARE = [
 
 CORS_ALLOW_ALL_ORIGINS = True
 
+# For development - allow CSRF for local testing
+CSRF_TRUSTED_ORIGINS = [
+    "http://127.0.0.1:8000",
+    "http://localhost:8000",
+    "http://127.0.0.1:5501",
+    "http://localhost:5501",
+]
+
+# Exempt API endpoints from CSRF
+CSRF_EXEMPT_URLS = [
+    '/api/',
+]
+
 # CORS_ALLOWED_ORIGINS = [
 #     "http://localhost:3000",  # or whatever port your frontend runs on
 #     "http://127.0.0.1:5501",
@@ -145,5 +158,6 @@ REST_FRAMEWORK = {
     ],
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',
+        'rest_framework.authentication.SessionAuthentication',
     ),
 }

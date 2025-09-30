@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Form Submission</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50 p-8">
+    <div class="max-w-2xl mx-auto">
+        <h1 class="text-3xl font-bold text-blue-600 mb-8">🧪 DRF Form Test Suite</h1>
+        
+        <div id="testResults" class="space-y-4"></div>
+        
+        <button id="runTests" class="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors">
+            🚀 Run All Tests
+        </button>
+    </div>
+
+    <script>
+        const API_BASE = 'http://127.0.0.1:8000/api';
+        
+        // Test data that matches your form exactly
+        const testData = {
+            company_name: "Test DRF Company",
+            industry: "Technology",
+            company_description: "Testing DRF compatibility with complete field set",
+            revenue: 2500000.00,
+            net_income: 350000.00,
+            total_assets: 4800000.00,
+            total_liabilities: 1600000.00,
+            shareholder_equity: 3200000.00,
+            cash_flow: 420000.00,
+            funding_ask: null,
+            current_revenue: 2500000.00,
+            previous_revenue: 2100000.00,
+            investment_flow: -200000.00,
+            financing_flow: 250000.00,
+            reporting_period: "yearly",
+            team_strength: "",
+            market_position: "",
+            brand_reputation: "",
+            data_source_confidence: "High",
+            confidence_percentage: 85
+        };
+
+        async function testLogin() {
+            try {
+                const response = await fetch(`${API_BASE}/login/`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        email: "test@startup.com",
+                        password: "testpassword123"
+                    })
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    return { success: true, token: data.token };
+                } else {
+                    return { success: false, error: await response.text() };
+                }
+            } catch (error) {
+                return { success: false, error: error.message };
+            }
+        }
+
+        async function testAddStartup(token) {
+            try {
+                const response = await fetch(`${API_BASE}/startup/add/`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(testData)
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    return { success: true, data };
+                } else {
+                    const errorText = await response.text();
+                    return { success: false, error: errorText, status: response.status };
+                }
+            } catch (error) {
+                return { success: false, error: error.message };
+            }
+        }
+
+        function displayResult(testName, result) {
+            const resultsDiv = document.getElementById('testResults');
+            const resultDiv = document.createElement('div');
+            resultDiv.className = `p-4 rounded-lg border ${result.success ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`;
+            
+            resultDiv.innerHTML = `
+                <h3 class="font-semibold text-lg ${result.success ? 'text-green-800' : 'text-red-800'}">
+                    ${result.success ? '✅' : '❌'} ${testName}
+                </h3>
+                <div class="mt-2 text-sm ${result.success ? 'text-green-700' : 'text-red-700'}">
+                    ${result.success ? 
+                        `Success: ${JSON.stringify(result.data || result, null, 2)}` : 
+                        `Error: ${result.error} ${result.status ? `(Status: ${result.status})` : ''}`
+                    }
+                </div>
+            `;
+            
+            resultsDiv.appendChild(resultDiv);
+        }
+
+        async function runAllTests() {
+            const resultsDiv = document.getElementById('testResults');
+            resultsDiv.innerHTML = '<div class="text-blue-600 font-semibold">🔄 Running tests...</div>';
+            
+            // Test 1: Login
+            const loginResult = await testLogin();
+            displayResult('Authentication Test', loginResult);
+            
+            if (loginResult.success) {
+                // Test 2: Add Startup with DRF-compliant data
+                const addResult = await testAddStartup(loginResult.token);
+                displayResult('DRF Add Startup Test', addResult);
+                
+                if (addResult.success) {
+                    displayResult('🎉 Overall Test Result', { 
+                        success: true, 
+                        data: `All tests passed! Your form is fully DRF-compatible. Startup ID: ${addResult.data.startup_id}` 
+                    });
+                }
+            }
+        }
+
+        document.getElementById('runTests').addEventListener('click', runAllTests);
+        
+        // Auto-run tests when page loads
+        window.addEventListener('load', runAllTests);
+    </script>
+</body>
+</html>

@@ -7,7 +7,8 @@ from django.contrib.auth import authenticate, login
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from django.contrib.auth.hashers import make_password, check_password
-from django.views.decorators.csrf import csrf_protect
+from django.views.decorators.csrf import csrf_protect, csrf_exempt
+from django.utils.decorators import method_decorator
 from django.views.decorators.http import require_POST
 from django.forms import ValidationError, inlineformset_factory
 from django.db import transaction
@@ -61,6 +62,7 @@ from .forms import (
     TeamMemberFormSet,
 )
 
+from rest_framework.decorators import api_view, authentication_classes, permission_classes
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -3524,28 +3526,60 @@ def registration_success(request):
 #     return render(request, 'Module_3/Added_Startups.html', {'startups': startups_with_analytics})
 
 class added_startups(APIView):
+    """
+    DRF-compliant view to get all startups created by the current authenticated startup user
+    """
     authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
         try:
-            profile = request.user.profile  # via related_name='profile'
+            # Get the RegisteredUser profile from the authenticated user
+            profile = RegisteredUser.objects.get(user=request.user)
         except RegisteredUser.DoesNotExist:
-            return Response({'error': 'Startup profile not found.'}, status=403)
+            return Response({
+                'error': 'User profile not found.',
+                'detail': 'No RegisteredUser profile associated with this user.'
+            }, status=status.HTTP_404_NOT_FOUND)
 
+        # Check if user is a startup
         if profile.label != 'startup':
-            return Response({'error': 'You must be logged in as a startup to access this page.'}, status=403)
+            return Response({
+                'error': 'Access denied.',
+                'detail': 'Only startup users can access their added startups.'
+            }, status=status.HTTP_403_FORBIDDEN)
 
-        startups = Startup.objects.filter(owner=profile)
+        # Get all startups owned by this user
+        startups = Startup.objects.filter(owner=profile).order_by('-created_at')
 
+        # Prepare enriched data with analytics
         enriched_data = []
         for startup in startups:
-            analytics = get_startup_analytics(startup)
-            serialized = StartupSerializer(startup).data
-            serialized['analytics'] = analytics
-            enriched_data.append(serialized)
+            try:
+                # Get analytics data
+                analytics = get_startup_analytics(startup)
+                
+                # Serialize startup data
+                serialized = StartupSerializer(startup).data
+                
+                # Add analytics
+                serialized['analytics'] = analytics
+                
+                enriched_data.append(serialized)
+                
+            except Exception as e:
+                # Log error but continue with other startups
+                print(f"Error processing startup {startup.id}: {e}")
+                # Still include the startup without analytics
+                serialized = StartupSerializer(startup).data
+                serialized['analytics'] = None
+                enriched_data.append(serialized)
 
-        return Response({'startups': enriched_data}, status=200)
+        return Response({
+            'success': True,
+            'count': len(enriched_data),
+            'startups': enriched_data
+        }, status=status.HTTP_200_OK)
 
 # def user_logout(request):
 #     # Clear session
@@ -3761,62 +3795,57 @@ class health_report_page(APIView):
 #     except Exception as e:
 #         return JsonResponse({'success': False, 'error': str(e)}, status=500)
 
-class add_startup(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request):
-        startup_user_id = request.session.get('startup_user_id')
-        user_label = request.session.get('user_label')
-
-        if not startup_user_id or user_label != 'startup':
-            return Response({'success': False, 'error': 'Not authenticated'}, status=status.HTTP_401_UNAUTHORIZED)
-
-        try:
-            user = RegisteredUser.objects.get(id=startup_user_id)
-        except RegisteredUser.DoesNotExist:
-            return Response({'success': False, 'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
-
-        company_data = request.data
-
-        if not company_data.get('company_name'):
-            return Response({'success': False, 'error': 'No company name provided'}, status=status.HTTP_400_BAD_REQUEST)
-
-        def to_decimal(value):
-            try:
-                return float(str(value).strip()) if value and str(value).strip() else None
-            except (ValueError, TypeError):
-                return None
-
-        confidence_level = company_data.get('data_source_confidence', 'Medium')
-        confidence_percentage = {
-            'High': 75,
-            'Medium': 50,
-            'Low': 30
-        }.get(confidence_level, 50)
-
-        try:
-            startup = Startup.objects.create(
-                owner=user,
-                company_name=company_data.get('company_name', ''),
-                industry=company_data.get('industry', ''),
-                company_description=company_data.get('company_description', ''),
-                data_source_confidence=confidence_level,
-                confidence_percentage=confidence_percentage,
-                revenue=to_decimal(company_data.get('current_revenue')),
-                net_income=to_decimal(company_data.get('net_income')),
-                total_assets=to_decimal(company_data.get('total_assets')),
-                total_liabilities=to_decimal(company_data.get('total_liabilities')),
-                cash_flow=to_decimal(company_data.get('cash_flow')),
-            )
-
+@api_view(['POST'])
+@authentication_classes([JWTAuthentication])
+@permission_classes([IsAuthenticated])
+@csrf_exempt
+def add_startup(request):
+    """
+    DRF-compliant view to add a new startup using StartupSerializer
+    """
+    # Get the authenticated user from JWT token
+    user = request.user
+    
+    try:
+        # Get the RegisteredUser profile
+        registered_user = RegisteredUser.objects.get(user=user)
+        
+        # Check if user is a startup
+        if registered_user.label != 'startup':
             return Response({
-                'success': True,
-                'message': 'Startup added successfully!',
-                'startup_id': startup.id
-            }, status=status.HTTP_201_CREATED)
+                'success': False, 
+                'error': 'Only startup users can add company information'
+            }, status=status.HTTP_403_FORBIDDEN)
+            
+    except RegisteredUser.DoesNotExist:
+        return Response({
+            'success': False, 
+            'error': 'User profile not found'
+        }, status=status.HTTP_404_NOT_FOUND)
 
-        except Exception as e:
-            return Response({'success': False, 'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    # Prepare data for serializer - add the owner
+    startup_data = request.data.copy()
+    
+    # Create serializer instance with the data
+    serializer = StartupSerializer(data=startup_data)
+    
+    if serializer.is_valid():
+        # Save the startup with the owner (not included in serializer)
+        startup = serializer.save(owner=registered_user)
+        
+        return Response({
+            'success': True,
+            'message': 'Startup added successfully!',
+            'startup_id': startup.id,
+            'data': StartupSerializer(startup).data
+        }, status=status.HTTP_201_CREATED)
+    else:
+        # Return validation errors
+        return Response({
+            'success': False,
+            'error': 'Validation failed',
+            'errors': serializer.errors
+        }, status=status.HTTP_400_BAD_REQUEST)
 
 @require_POST
 # def delete_startup(request, startup_id):

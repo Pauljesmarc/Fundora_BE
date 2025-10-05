@@ -12,6 +12,8 @@ from django.utils.decorators import method_decorator
 from django.views.decorators.http import require_POST
 from django.forms import ValidationError, inlineformset_factory
 from django.db import transaction
+from rest_framework.generics import ListAPIView
+from django.db.models import F, Value, FloatField, ExpressionWrapper, Case, When
 import uuid
 
 # 3rd-party
@@ -562,10 +564,24 @@ class investor_registration(APIView):
 #     return render(request, 'Module_1/Login.html')
 
 class login_view(APIView):
+    """
+    Unified login view for startups and investors.
+    Returns JWT token and user info (id, name, email, label).
+    """
     def post(self, request):
         serializer = LoginSerializer(data=request.data)
         if serializer.is_valid():
             user = serializer.validated_data['user']
+
+            # Ensure the user has a profile
+            try:
+                profile = user.profile  # RegisteredUser linked via OneToOneField related_name='profile'
+            except Exception:
+                return Response(
+                    {'success': False, 'error': 'User profile not found.'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
             tokens = get_tokens_for_user(user)
             return Response({
                 "message": "Login successful",
@@ -574,10 +590,15 @@ class login_view(APIView):
                     "id": user.id,
                     "name": f"{user.first_name} {user.last_name}",
                     "email": user.email,
-                    "label": user.profile.label
+                    "label": profile.label
                 }
             }, status=status.HTTP_200_OK)
-        return Response(serializer.errors, status=status.HTTP_401_UNAUTHORIZED)
+
+        # Invalid login credentials
+        return Response(
+            {"success": False, "errors": serializer.errors},
+            status=status.HTTP_401_UNAUTHORIZED
+        )
     
 #session token
 def get_tokens_for_user(user):
@@ -585,7 +606,7 @@ def get_tokens_for_user(user):
     return {
         'refresh': str(refresh),
         'access': str(refresh.access_token),
-    } 
+    }
 
 
 # def dashboard(request):
@@ -861,35 +882,26 @@ def calculate_projected_return(startup):
                     if span > 0:
                         cagr = (last_rev / first_rev) ** (1 / span) - 1
                         return round(cagr * 100, 2)
-                    elif last_rev != first_rev:
-                        return round(((last_rev - first_rev) / first_rev) * 100, 2)
-                else:
-                    pos_revs = [float(f.revenue) for f in financials if f.revenue and float(f.revenue) > 0]
-                    if len(pos_revs) >= 2:
-                        avg_growth = sum(pos_revs) / len(pos_revs)
-                        return round(min(avg_growth / 1000, 50.0), 2)
-                    return 5.0
-            elif financials.count() == 1:
+                    return round(((last_rev - first_rev) / first_rev) * 100, 2)
+            if financials.count() == 1:
                 rev = float(financials.first().revenue or 0)
                 return 15.0 if rev > 0 else 8.0
-            else:
-                return 12.0
+            return 12.0
         else:
             if startup.revenue and startup.total_assets and startup.total_assets > 0:
-                return round((startup.revenue / startup.total_assets) * 100, 2)
+                return round((float(startup.revenue) / float(startup.total_assets)) * 100, 2)
+        return 10.0
     except Exception:
-        return 10.0 if hasattr(startup, 'source_deck') else None
+        return 10.0
 
 def calculate_reward_potential(startup):
     try:
         if hasattr(startup, 'source_deck') and startup.source_deck:
             deck = startup.source_deck
-            financials = deck.financials.order_by('year')
-
+            financials = deck.financials.all()
             if financials.exists():
                 total_rev = sum(float(f.revenue or 0) for f in financials)
                 total_profit = sum(float(f.profit or 0) for f in financials)
-
                 if total_rev > 0:
                     margin = total_profit / total_rev
                     if margin > 0.2:
@@ -898,11 +910,7 @@ def calculate_reward_potential(startup):
                         return 3.5, 'Medium', True
                     elif margin > 0:
                         return 2.5, 'Medium', True
-                    else:
-                        return 2.0, 'Medium', True
-                else:
-                    future_rev = sum(float(f.revenue or 0) for f in financials if f.year > 2025)
-                    return (3.0 if future_rev > 0 else 2.0), 'Medium', True
+                    return 2.0, 'Medium', True
             return 3.0, 'Medium', True
         else:
             if startup.revenue and startup.net_income:
@@ -916,30 +924,100 @@ def calculate_reward_potential(startup):
                         return 3.5, startup.data_source_confidence, False
                     elif margin > 0:
                         return 2.5, startup.data_source_confidence, False
-                    else:
-                        return 2.0, startup.data_source_confidence, False
+                    return 2.0, startup.data_source_confidence, False
         return 3.0, getattr(startup, 'data_source_confidence', 'Medium'), False
     except Exception:
         return 3.0, getattr(startup, 'data_source_confidence', 'Medium'), False
 
+
 def sort_startups(startups, sort_by):    
     if sort_by == 'projected_return_desc':
-        return sorted(startups, key=lambda x: x.projected_return or 0, reverse=True)
+        return sorted(startups, key=lambda x: x.get("projected_return") or 0, reverse=True)
     elif sort_by == 'projected_return_asc':
-        return sorted(startups, key=lambda x: x.projected_return or 0)
+        return sorted(startups, key=lambda x: x.get("projected_return") or 0)
     elif sort_by == 'reward_potential_desc':
-        return sorted(startups, key=lambda x: x.reward_potential or 0, reverse=True)
+        return sorted(startups, key=lambda x: x.get("reward_potential") or 0, reverse=True)
     elif sort_by == 'confidence_desc':
         confidence_order = {'High': 3, 'Medium': 2, 'Low': 1}
-        return sorted(startups, key=lambda x: confidence_order.get(x.data_source_confidence, 0), reverse=True)
+        return sorted(startups, key=lambda x: confidence_order.get(x.get("confidence"), 0), reverse=True)
     elif sort_by == 'risk_asc':
         confidence_order = {'High': 1, 'Medium': 2, 'Low': 3}  # High confidence = low risk
-        return sorted(startups, key=lambda x: confidence_order.get(x.data_source_confidence, 2))
+        return sorted(startups, key=lambda x: confidence_order.get(x.get("confidence"), 2))
     elif sort_by == 'company_name':
-        return sorted(startups, key=lambda x: x.company_name.lower())
-    # 'recommended' or default - keep original order
+        return sorted(startups, key=lambda x: x.get("company_name", "").lower())
     return startups
 
+class StartupListView(ListAPIView):
+    serializer_class = StartupSerializer
+    # let get_queryset build query dynamically
+
+    def get_queryset(self):
+        qs = Startup.objects.all()
+
+        # annotated projected_return (safe: only compute when revenue > 0)
+        proj_expr = ExpressionWrapper(F('net_income') * Value(100.0) / F('revenue'),
+                                     output_field=FloatField())
+        projected_return_case = Case(
+            When(revenue__isnull=False, revenue__gt=0, then=proj_expr),
+            default=Value(None),
+            output_field=FloatField()
+        )
+        qs = qs.annotate(projected_return=projected_return_case)
+
+        # annotate reward_potential using same breakpoints used in serializer
+        reward_case = Case(
+            When(projected_return__gt=30, then=Value(5)),
+            When(projected_return__gt=20, then=Value(4)),
+            When(projected_return__gt=10, then=Value(3)),
+            When(projected_return__gt=0, then=Value(2)),
+            default=Value(1),
+            output_field=FloatField()
+        )
+        qs = qs.annotate(reward_potential=reward_case)
+
+        params = self.request.query_params
+
+        # ---- filters ----
+        industry = params.get('industry')
+        if industry:
+            qs = qs.filter(industry__iexact=industry)
+
+        min_return = params.get('min_return')
+        if min_return:
+            try:
+                mr = float(min_return)
+                qs = qs.filter(projected_return__gte=mr)
+            except (ValueError, TypeError):
+                pass
+
+        # risk slider (0-100) maps to confidence_percentage threshold
+        risk = params.get('risk')
+        if risk:
+            try:
+                r = int(risk)
+                # keep interpretation simple: only show startups with confidence >= r
+                qs = qs.filter(confidence_percentage__gte=r)
+            except (ValueError, TypeError):
+                pass
+
+        # ---- sorting ----
+        sort_by = params.get('sort_by')
+        order_map = {
+            'projected_return_desc': '-projected_return',
+            'projected_return_asc': 'projected_return',
+            'reward_potential_desc': '-reward_potential',
+            'confidence_desc': '-confidence_percentage',
+            'risk_asc': 'confidence_percentage',
+            'company_name': 'company_name',
+        }
+        ordering = order_map.get(sort_by)
+        if ordering:
+            qs = qs.order_by(ordering)
+        else:
+            qs = qs.order_by('-created_at')
+
+        return qs
+    
 # def watchlist_view(request):
 #     # Get Django user from session
 #     django_user = get_django_user_from_session(request)
@@ -3527,14 +3605,15 @@ def registration_success(request):
 
 class added_startups(APIView):
     """
-    DRF-compliant view to get all startups created by the current authenticated startup user
+    DRF view to get startups:
+    - If user is a startup → see their own startups
+    - If user is an investor → see all startups
     """
     authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
         try:
-            # Get the RegisteredUser profile from the authenticated user
             profile = RegisteredUser.objects.get(user=request.user)
         except RegisteredUser.DoesNotExist:
             return Response({
@@ -3542,35 +3621,30 @@ class added_startups(APIView):
                 'detail': 'No RegisteredUser profile associated with this user.'
             }, status=status.HTTP_404_NOT_FOUND)
 
-        # Check if user is a startup
-        if profile.label != 'startup':
+        # If user is a startup, show their startups
+        if profile.label == 'startup':
+            startups = Startup.objects.filter(owner=profile).order_by('-created_at')
+
+        # If user is an investor, show ALL startups
+        elif profile.label == 'investor':
+            startups = Startup.objects.all().order_by('-created_at')
+
+        else:
             return Response({
                 'error': 'Access denied.',
-                'detail': 'Only startup users can access their added startups.'
+                'detail': 'Only startup or investor users can access startups.'
             }, status=status.HTTP_403_FORBIDDEN)
 
-        # Get all startups owned by this user
-        startups = Startup.objects.filter(owner=profile).order_by('-created_at')
-
-        # Prepare enriched data with analytics
+        # Serialize + enrich with analytics
         enriched_data = []
         for startup in startups:
             try:
-                # Get analytics data
                 analytics = get_startup_analytics(startup)
-                
-                # Serialize startup data
                 serialized = StartupSerializer(startup).data
-                
-                # Add analytics
                 serialized['analytics'] = analytics
-                
                 enriched_data.append(serialized)
-                
             except Exception as e:
-                # Log error but continue with other startups
                 print(f"Error processing startup {startup.id}: {e}")
-                # Still include the startup without analytics
                 serialized = StartupSerializer(startup).data
                 serialized['analytics'] = None
                 enriched_data.append(serialized)
@@ -3580,6 +3654,7 @@ class added_startups(APIView):
             'count': len(enriched_data),
             'startups': enriched_data
         }, status=status.HTTP_200_OK)
+
 
 # def user_logout(request):
 #     # Clear session
@@ -4315,42 +4390,42 @@ class view_startup_report(APIView):
     
 #     return render(request, 'Module_3/Startup_Login.html', {'form': form})
 
-class startup_login(APIView):
-    def post(self, request):
-        email = request.data.get('email')
-        password = request.data.get('password')
+# class startup_login(APIView):
+#     def post(self, request):
+#         email = request.data.get('email')
+#         password = request.data.get('password')
 
-        if not email or not password:
-            return Response({'success': False, 'error': 'Email and password are required.'}, status=status.HTTP_400_BAD_REQUEST)
+#         if not email or not password:
+#             return Response({'success': False, 'error': 'Email and password are required.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        try:
-            registration = RegisteredUser.objects.get(email=email)
+#         try:
+#             registration = RegisteredUser.objects.get(email=email)
 
-            if not check_password(password, registration.password):
-                return Response({'success': False, 'error': 'Invalid email or password.'}, status=status.HTTP_401_UNAUTHORIZED)
+#             if not check_password(password, registration.password):
+#                 return Response({'success': False, 'error': 'Invalid email or password.'}, status=status.HTTP_401_UNAUTHORIZED)
 
-            if registration.label != 'startup':
-                return Response({'success': False, 'error': 'This login is for startup users only.'}, status=status.HTTP_403_FORBIDDEN)
+#             if registration.label != 'startup':
+#                 return Response({'success': False, 'error': 'This login is for startup users only.'}, status=status.HTTP_403_FORBIDDEN)
 
-            # Store session data if needed
-            request.session['startup_user_id'] = registration.id
-            request.session['user_email'] = registration.email
-            request.session['user_name'] = f"{registration.first_name} {registration.last_name}"
-            request.session['user_label'] = registration.label
+#             # Store session data if needed
+#             request.session['startup_user_id'] = registration.id
+#             request.session['user_email'] = registration.email
+#             request.session['user_name'] = f"{registration.first_name} {registration.last_name}"
+#             request.session['user_label'] = registration.label
 
-            return Response({
-                'success': True,
-                'message': 'Login successful.',
-                'user': {
-                    'id': registration.id,
-                    'email': registration.email,
-                    'name': f"{registration.first_name} {registration.last_name}",
-                    'label': registration.label
-                }
-            }, status=status.HTTP_200_OK)
+#             return Response({
+#                 'success': True,
+#                 'message': 'Login successful.',
+#                 'user': {
+#                     'id': registration.id,
+#                     'email': registration.email,
+#                     'name': f"{registration.first_name} {registration.last_name}",
+#                     'label': registration.label
+#                 }
+#             }, status=status.HTTP_200_OK)
 
-        except RegisteredUser.DoesNotExist:
-            return Response({'success': False, 'error': 'Invalid email or password.'}, status=status.HTTP_401_UNAUTHORIZED)
+#         except RegisteredUser.DoesNotExist:
+#             return Response({'success': False, 'error': 'Invalid email or password.'}, status=status.HTTP_401_UNAUTHORIZED)
 
 #MOD - 4
 # def create_deck(request):

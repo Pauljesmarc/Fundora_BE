@@ -1,5 +1,6 @@
 from django.urls import path
 from . import views
+from .views import StartupListView
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -99,6 +100,7 @@ urlpatterns = [
 
     # Dashboard & Watchlist
     path('investor/dashboard/', views.dashboard.as_view(), name='dashboard'),
+    path('api/startups/', StartupListView.as_view(), name='startup-list'),
     path('investor/watchlist/', views.watchlist_view.as_view(), name='watchlist'),
     path('investor/watchlist/add/<int:startup_id>/', views.add_to_watchlist.as_view(), name='add_to_watchlist'),
     path('investor/watchlist/remove/<int:startup_id>/', views.remove_from_watchlist.as_view(), name='remove_from_watchlist'),

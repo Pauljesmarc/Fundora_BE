@@ -85,8 +85,11 @@ class DeckSerializer(serializers.ModelSerializer):
         }
 
 class StartupSerializer(serializers.ModelSerializer):
-    owner_email = serializers.EmailField(source='owner.email', read_only=True)
+    owner_email = serializers.EmailField(source='owner.user.email', read_only=True)
     source_deck_id = serializers.IntegerField(source='source_deck.id', read_only=True)
+
+    reward_potential = serializers.SerializerMethodField()
+    projected_return = serializers.SerializerMethodField()
 
     class Meta:
         model = Startup
@@ -113,9 +116,13 @@ class StartupSerializer(serializers.ModelSerializer):
             'market_position',
             'brand_reputation',
             'confidence_percentage',
+            'reward_potential',    
+            'projected_return',
             'owner_email',
             'created_at',
-            'updated_at'
+            'updated_at',
+            
+            
         ]
         extra_kwargs = {
             'company_description': {'required': False, 'allow_blank': True},
@@ -128,6 +135,41 @@ class StartupSerializer(serializers.ModelSerializer):
             'financing_flow': {'required': False, 'allow_null': True},
             'reporting_period': {'required': False, 'allow_blank': True},
         }
+    def get_reward_potential(self, obj):
+        if obj.revenue and obj.net_income:
+            try:
+                revenue = float(obj.revenue)
+                net_income = float(obj.net_income)
+                if revenue == 0:
+                    return None
+                margin = net_income / revenue
+                if margin > 0.3:
+                    return 5
+                elif margin > 0.2:
+                    return 4
+                elif margin > 0.1:
+                    return 3
+                elif margin > 0:
+                    return 2
+                else:
+                    return 1
+            except Exception:
+                return None
+        return None
+
+    def get_projected_return(self, obj):
+        if obj.revenue and obj.net_income:
+            try:
+                revenue = float(obj.revenue)
+                net_income = float(obj.net_income)
+                if revenue == 0:
+                    return None
+                return round((net_income / revenue) * 100, 2)
+            except Exception:
+                return None
+        return None
+
+
 
 class ProblemSerializer(serializers.ModelSerializer):
     class Meta:

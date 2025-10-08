@@ -3608,6 +3608,7 @@ class added_startups(APIView):
     DRF view to get startups:
     - If user is a startup → see their own startups
     - If user is an investor → see all startups
+    - Supports filtering via query params
     """
     authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated]
@@ -3621,39 +3622,90 @@ class added_startups(APIView):
                 'detail': 'No RegisteredUser profile associated with this user.'
             }, status=status.HTTP_404_NOT_FOUND)
 
-        # If user is a startup, show their startups
+        # Base queryset
         if profile.label == 'startup':
             startups = Startup.objects.filter(owner=profile).order_by('-created_at')
-
-        # If user is an investor, show ALL startups
         elif profile.label == 'investor':
             startups = Startup.objects.all().order_by('-created_at')
-
         else:
             return Response({
                 'error': 'Access denied.',
                 'detail': 'Only startup or investor users can access startups.'
             }, status=status.HTTP_403_FORBIDDEN)
 
-        # Serialize + enrich with analytics
-        enriched_data = []
-        for startup in startups:
-            try:
-                analytics = get_startup_analytics(startup)
-                serialized = StartupSerializer(startup).data
-                serialized['analytics'] = analytics
-                enriched_data.append(serialized)
-            except Exception as e:
-                print(f"Error processing startup {startup.id}: {e}")
-                serialized = StartupSerializer(startup).data
-                serialized['analytics'] = None
-                enriched_data.append(serialized)
+        # --- Apply Filters ---
+        industry = request.query_params.get('industry')
+        confidence = request.query_params.get('confidence')
+        min_return = request.query_params.get('min_return')
+        max_return = request.query_params.get('max_return')
+        risk = request.query_params.get('risk')
 
-        return Response({
-            'success': True,
-            'count': len(enriched_data),
-            'startups': enriched_data
-        }, status=status.HTTP_200_OK)
+        if industry and industry.lower() != 'all':
+            startups = startups.filter(industry__icontains=industry)
+
+        if confidence and confidence.lower() != 'all':
+            startups = startups.filter(data_source_confidence__iexact=confidence)
+
+        if min_return:
+            try:
+                startups = startups.filter(current_revenue__gte=float(min_return))
+            except ValueError:
+                pass
+
+        if max_return:
+            try:
+                startups = startups.filter(current_revenue__lte=float(max_return))
+            except ValueError:
+                pass
+
+        # Risk filter - using confidence_percentage to determine risk
+        # Filter at database level using confidence_percentage
+        if risk:
+            if risk.lower() == 'low':
+                # Low risk: high confidence (70%+)
+                startups = startups.filter(confidence_percentage__gte=70)
+            elif risk.lower() == 'medium':
+                # Medium risk: confidence between 40-70%
+                startups = startups.filter(
+                    confidence_percentage__gte=40,
+                    confidence_percentage__lt=70
+                )
+            elif risk.lower() == 'high':
+                # High risk: low confidence (<40%)
+                startups = startups.filter(confidence_percentage__lt=40)
+
+        # --- Serialize + Add Computed Fields ---
+        try:
+            enriched_data = []
+            for startup in startups:
+                try:
+                    serialized = StartupSerializer(startup).data
+                    
+                    # Add computed fields that the frontend expects
+                    serialized['reward_potential'] = calculate_reward_potential(startup)
+                    serialized['projected_return'] = calculate_projected_return(startup)
+                    
+                    enriched_data.append(serialized)
+                except Exception as e:
+                    print(f"Error serializing startup {startup.id}: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    continue
+
+            return Response({
+                'success': True,
+                'count': len(enriched_data),
+                'results': enriched_data
+            }, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            import traceback
+            print(f"Error in added_startups view: {e}")
+            traceback.print_exc()
+            return Response({
+                'error': 'Internal server error',
+                'detail': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 # def user_logout(request):

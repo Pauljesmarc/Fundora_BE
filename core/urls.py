@@ -1,6 +1,6 @@
 from django.urls import path
 from . import views
-from .views import StartupListView
+from .views import StartupListView, StartupDetailView
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -101,6 +101,7 @@ urlpatterns = [
     # Dashboard & Watchlist
     path('investor/dashboard/', views.dashboard.as_view(), name='dashboard'),
     path('api/startups/', StartupListView.as_view(), name='startup-list'),
+    path('api/startups/<int:pk>/', StartupDetailView.as_view(), name='startup-detail'),
     path('investor/watchlist/', views.watchlist_view.as_view(), name='watchlist'),
     path('investor/watchlist/add/<int:startup_id>/', views.add_to_watchlist.as_view(), name='add_to_watchlist'),
     path('investor/watchlist/remove/<int:startup_id>/', views.remove_from_watchlist.as_view(), name='remove_from_watchlist'),
@@ -111,8 +112,8 @@ urlpatterns = [
     path('investor/comparison/export-pdf/', views.export_startup_comparison_pdf.as_view(), name='export_startup_comparison_pdf'),
 
     # Company Profile
-    path('startup/<int:startup_id>/profile/', views.company_profile.as_view(), name='company_profile'),
-    path('startup/<int:startup_id>/profile/download-pdf/', views.download_company_profile_pdf.as_view(), name='download_company_profile_pdf'),
+    path('api/startups/<int:startup_id>/profile/', views.company_profile.as_view(), name='company_profile'),
+    path('api/startups/<int:startup_id>/profile/download-pdf/', views.download_company_profile_pdf.as_view(), name='download_company_profile_pdf'),
 
     # Investment Simulation
     path('investor/simulation/', views.investment_simulation.as_view(), name='investment_simulation'),

@@ -15,6 +15,7 @@ from django.db import transaction
 from rest_framework.generics import ListAPIView
 from django.db.models import F, Value, FloatField, ExpressionWrapper, Case, When
 import uuid
+from rest_framework.generics import RetrieveAPIView
 
 # 3rd-party
 from reportlab.lib.pagesizes import A4
@@ -475,7 +476,23 @@ class deck_builder(APIView):
                 else:
                     return Response({"error": "No active deck found"}, status=status.HTTP_400_BAD_REQUEST)
 
-            return Response({"message": f"{section} saved successfully", "deck_id": deck.id}, status=status.HTTP_200_OK)
+                # Create Startup entry linked to Deck, if not already existing
+                from .models import Startup
+                if not Startup.objects.filter(source_deck_id=deck.id).exists():
+                    Startup.objects.create(
+                        company_name=getattr(deck, "company_name", "Untitled Deck"),
+                        company_description=getattr(deck, "description", ""),
+                        industry=getattr(deck, "industry", "—"),
+                        data_source_confidence="Medium",
+                        source_deck_id=deck.id,
+                        is_deck_builder=True,
+                        owner_email=request.user.email if hasattr(request.user, "email") else "unknown@fundora.local"
+                    )
+
+            return Response(
+                {"message": f"{section} saved successfully", "deck_id": deck.id},
+                status=status.HTTP_200_OK
+            )
         else:
             return Response({"errors": form.errors}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -866,66 +883,65 @@ class dashboard(APIView):
 # Helper functions for calculations and sorting
 
 def calculate_projected_return(startup):
+    """
+    Projected Return ≈ Net Income / Shareholder Equity
+    If equity ≤ 0, fall back to ROA = Net Income / Total Assets.
+    Expressed as percentage.
+    """
     try:
-        if hasattr(startup, 'source_deck') and startup.source_deck:
-            deck = startup.source_deck
-            financials = deck.financials.order_by('year')
+        income = float(startup.net_income or 0)
+        equity = float(startup.shareholder_equity or 0)
+        assets = float(startup.total_assets or 0)
 
-            if financials.count() >= 2:
-                first = financials.first()
-                last = financials.last()
-                first_rev = float(first.revenue or 0)
-                last_rev = float(last.revenue or 0)
-
-                if first_rev > 0 and last_rev > 0:
-                    span = last.year - first.year
-                    if span > 0:
-                        cagr = (last_rev / first_rev) ** (1 / span) - 1
-                        return round(cagr * 100, 2)
-                    return round(((last_rev - first_rev) / first_rev) * 100, 2)
-            if financials.count() == 1:
-                rev = float(financials.first().revenue or 0)
-                return 15.0 if rev > 0 else 8.0
-            return 12.0
-        else:
-            if startup.revenue and startup.total_assets and startup.total_assets > 0:
-                return round((float(startup.revenue) / float(startup.total_assets)) * 100, 2)
-        return 10.0
+        if equity > 0:
+            return round((income / equity) * 100, 2)
+        elif assets > 0:
+            return round((income / assets) * 100, 2)
+        return 0.0
     except Exception:
-        return 10.0
+        return 0.0
+
 
 def calculate_reward_potential(startup):
+    """
+    Reward Potential = normalized composite of:
+    - Profit Margin (Net Income / Revenue)
+    - Return on Assets (Net Income / Total Assets)
+    - Debt Ratio (Liabilities / Assets)
+    Output scaled 1–5.
+    """
     try:
-        if hasattr(startup, 'source_deck') and startup.source_deck:
-            deck = startup.source_deck
-            financials = deck.financials.all()
-            if financials.exists():
-                total_rev = sum(float(f.revenue or 0) for f in financials)
-                total_profit = sum(float(f.profit or 0) for f in financials)
-                if total_rev > 0:
-                    margin = total_profit / total_rev
-                    if margin > 0.2:
-                        return 4.5, 'Medium', True
-                    elif margin > 0.1:
-                        return 3.5, 'Medium', True
-                    elif margin > 0:
-                        return 2.5, 'Medium', True
-                    return 2.0, 'Medium', True
-            return 3.0, 'Medium', True
+        rev = float(startup.revenue or 0)
+        income = float(startup.net_income or 0)
+        assets = float(startup.total_assets or 0)
+        liab = float(startup.total_liabilities or 0)
+
+        if rev <= 0 or assets <= 0:
+            return 3.0, getattr(startup, 'data_source_confidence', 'Medium'), False
+
+        profit_margin = income / rev
+        roa = income / assets
+        debt_ratio = liab / assets
+
+        # Base score by profitability and efficiency
+        base = (profit_margin * 3 + roa * 2) * 100  # weighted blend
+        base = max(min(base, 100), -100)
+
+        # Risk adjustment by leverage
+        risk_adj = 1.0 - min(debt_ratio, 2.0) * 0.25
+        adjusted = base * risk_adj
+
+        # Map to 1–5 scale
+        if adjusted >= 60:
+            score = 4.5
+        elif adjusted >= 30:
+            score = 3.5
+        elif adjusted > 0:
+            score = 2.5
         else:
-            if startup.revenue and startup.net_income:
-                rev = float(startup.revenue or 0)
-                income = float(startup.net_income or 0)
-                if rev > 0:
-                    margin = income / rev
-                    if margin > 0.2:
-                        return 4.5, startup.data_source_confidence, False
-                    elif margin > 0.1:
-                        return 3.5, startup.data_source_confidence, False
-                    elif margin > 0:
-                        return 2.5, startup.data_source_confidence, False
-                    return 2.0, startup.data_source_confidence, False
-        return 3.0, getattr(startup, 'data_source_confidence', 'Medium'), False
+            score = 1.5
+
+        return round(score, 1), getattr(startup, 'data_source_confidence', 'Medium'), False
     except Exception:
         return 3.0, getattr(startup, 'data_source_confidence', 'Medium'), False
 
@@ -1017,6 +1033,10 @@ class StartupListView(ListAPIView):
             qs = qs.order_by('-created_at')
 
         return qs
+    
+class StartupDetailView(RetrieveAPIView):
+    queryset = Startup.objects.all()
+    serializer_class = StartupSerializer
     
 # def watchlist_view(request):
 #     # Get Django user from session
@@ -1602,18 +1622,20 @@ class company_profile(APIView):
         risk_score = min(risk_score, 5.0)
 
         return Response({
-            "startup": {
-                "id": startup.id,
-                "company_name": startup.company_name,
-                "industry": startup.industry,
-                "is_deck_builder": False
-            },
-            "company_data": {
-                "risk_score": round(risk_score, 1),
-                "reward_score": round(reward_score, 1),
-                "risk_score_percent": round((risk_score / 5) * 100, 1),
-                "reward_score_percent": round((reward_score / 5) * 100, 1)
-            },
+            "id": startup.id,
+            "company_name": startup.company_name,
+            "industry": startup.industry or "—",
+            "company_description": startup.company_description or "",
+            "revenue": startup.revenue or "N/A",
+            "net_income": startup.net_income or "N/A",
+            "total_assets": getattr(startup, 'total_assets', 'N/A'),
+            "cash_flow": getattr(startup, 'cash_flow', 'N/A'),
+            "team_strength": getattr(startup, 'team_strength', 'No data'),
+            "market_position": getattr(startup, 'market_position', 'No data'),
+            "brand_reputation": getattr(startup, 'brand_reputation', 'No data'),
+            "risk_score": round(risk_score, 1),
+            "reward_score": round(reward_score, 1),
+            "data_source_confidence": getattr(startup, 'data_source_confidence', 'Medium'),
             "is_in_watchlist": is_in_watchlist
         }, status=status.HTTP_200_OK)
 
@@ -2170,83 +2192,83 @@ class compare_startups(APIView):
 
         return Response({"startups": startup_data}, status=status.HTTP_200_OK)
 # HeLper functions for calculations
-def calculate_projected_return(startup):
-    try:
-        if hasattr(startup, 'source_deck') and startup.source_deck:
-            deck = startup.source_deck
-            financials = deck.financials.order_by('year')
+# def calculate_projected_return(startup):
+#     try:
+#         if hasattr(startup, 'source_deck') and startup.source_deck:
+#             deck = startup.source_deck
+#             financials = deck.financials.order_by('year')
 
-            if financials.count() >= 2:
-                first = financials.first()
-                last = financials.last()
-                first_rev = float(first.revenue or 0)
-                last_rev = float(last.revenue or 0)
+#             if financials.count() >= 2:
+#                 first = financials.first()
+#                 last = financials.last()
+#                 first_rev = float(first.revenue or 0)
+#                 last_rev = float(last.revenue or 0)
 
-                if first_rev > 0 and last_rev > 0:
-                    span = last.year - first.year
-                    if span > 0:
-                        cagr = (last_rev / first_rev) ** (1 / span) - 1
-                        return round(cagr * 100, 2)
-                    elif last_rev != first_rev:
-                        return round(((last_rev - first_rev) / first_rev) * 100, 2)
-                else:
-                    pos_revs = [float(f.revenue) for f in financials if f.revenue and float(f.revenue) > 0]
-                    if len(pos_revs) >= 2:
-                        avg_growth = sum(pos_revs) / len(pos_revs)
-                        return round(min(avg_growth / 1000, 50.0), 2)
-                    return 5.0
-            elif financials.count() == 1:
-                rev = float(financials.first().revenue or 0)
-                return 15.0 if rev > 0 else 8.0
-            else:
-                return 12.0
-        else:
-            if startup.revenue and startup.total_assets and startup.total_assets > 0:
-                return round((startup.revenue / startup.total_assets) * 100, 2)
-    except Exception:
-        return 10.0 if hasattr(startup, 'source_deck') else None
+#                 if first_rev > 0 and last_rev > 0:
+#                     span = last.year - first.year
+#                     if span > 0:
+#                         cagr = (last_rev / first_rev) ** (1 / span) - 1
+#                         return round(cagr * 100, 2)
+#                     elif last_rev != first_rev:
+#                         return round(((last_rev - first_rev) / first_rev) * 100, 2)
+#                 else:
+#                     pos_revs = [float(f.revenue) for f in financials if f.revenue and float(f.revenue) > 0]
+#                     if len(pos_revs) >= 2:
+#                         avg_growth = sum(pos_revs) / len(pos_revs)
+#                         return round(min(avg_growth / 1000, 50.0), 2)
+#                     return 5.0
+#             elif financials.count() == 1:
+#                 rev = float(financials.first().revenue or 0)
+#                 return 15.0 if rev > 0 else 8.0
+#             else:
+#                 return 12.0
+#         else:
+#             if startup.revenue and startup.total_assets and startup.total_assets > 0:
+#                 return round((startup.revenue / startup.total_assets) * 100, 2)
+#     except Exception:
+#         return 10.0 if hasattr(startup, 'source_deck') else None
 
-def calculate_reward_potential(startup):
-    try:
-        if hasattr(startup, 'source_deck') and startup.source_deck:
-            deck = startup.source_deck
-            financials = deck.financials.order_by('year')
+# def calculate_reward_potential(startup):
+#     try:
+#         if hasattr(startup, 'source_deck') and startup.source_deck:
+#             deck = startup.source_deck
+#             financials = deck.financials.order_by('year')
 
-            if financials.exists():
-                total_rev = sum(float(f.revenue or 0) for f in financials)
-                total_profit = sum(float(f.profit or 0) for f in financials)
+#             if financials.exists():
+#                 total_rev = sum(float(f.revenue or 0) for f in financials)
+#                 total_profit = sum(float(f.profit or 0) for f in financials)
 
-                if total_rev > 0:
-                    margin = total_profit / total_rev
-                    if margin > 0.2:
-                        return 4.5, 'Medium', True
-                    elif margin > 0.1:
-                        return 3.5, 'Medium', True
-                    elif margin > 0:
-                        return 2.5, 'Medium', True
-                    else:
-                        return 2.0, 'Medium', True
-                else:
-                    future_rev = sum(float(f.revenue or 0) for f in financials if f.year > 2025)
-                    return (3.0 if future_rev > 0 else 2.0), 'Medium', True
-            return 3.0, 'Medium', True
-        else:
-            if startup.revenue and startup.net_income:
-                rev = float(startup.revenue or 0)
-                income = float(startup.net_income or 0)
-                if rev > 0:
-                    margin = income / rev
-                    if margin > 0.2:
-                        return 4.5, startup.data_source_confidence, False
-                    elif margin > 0.1:
-                        return 3.5, startup.data_source_confidence, False
-                    elif margin > 0:
-                        return 2.5, startup.data_source_confidence, False
-                    else:
-                        return 2.0, startup.data_source_confidence, False
-        return 3.0, getattr(startup, 'data_source_confidence', 'Medium'), False
-    except Exception:
-        return 3.0, getattr(startup, 'data_source_confidence', 'Medium'), False
+#                 if total_rev > 0:
+#                     margin = total_profit / total_rev
+#                     if margin > 0.2:
+#                         return 4.5, 'Medium', True
+#                     elif margin > 0.1:
+#                         return 3.5, 'Medium', True
+#                     elif margin > 0:
+#                         return 2.5, 'Medium', True
+#                     else:
+#                         return 2.0, 'Medium', True
+#                 else:
+#                     future_rev = sum(float(f.revenue or 0) for f in financials if f.year > 2025)
+#                     return (3.0 if future_rev > 0 else 2.0), 'Medium', True
+#             return 3.0, 'Medium', True
+#         else:
+#             if startup.revenue and startup.net_income:
+#                 rev = float(startup.revenue or 0)
+#                 income = float(startup.net_income or 0)
+#                 if rev > 0:
+#                     margin = income / rev
+#                     if margin > 0.2:
+#                         return 4.5, startup.data_source_confidence, False
+#                     elif margin > 0.1:
+#                         return 3.5, startup.data_source_confidence, False
+#                     elif margin > 0:
+#                         return 2.5, startup.data_source_confidence, False
+#                     else:
+#                         return 2.0, startup.data_source_confidence, False
+#         return 3.0, getattr(startup, 'data_source_confidence', 'Medium'), False
+#     except Exception:
+#         return 3.0, getattr(startup, 'data_source_confidence', 'Medium'), False
 
 # def export_startup_comparison_pdf(request):
 #     """Export startup comparison as PDF"""

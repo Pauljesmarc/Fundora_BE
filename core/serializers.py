@@ -90,6 +90,7 @@ class StartupSerializer(serializers.ModelSerializer):
 
     reward_potential = serializers.SerializerMethodField()
     projected_return = serializers.SerializerMethodField()
+    display_industry = serializers.SerializerMethodField()
 
     class Meta:
         model = Startup
@@ -97,6 +98,7 @@ class StartupSerializer(serializers.ModelSerializer):
             'id',
             'company_name',
             'industry',
+            'display_industry',
             'company_description',
             'data_source_confidence',
             'revenue',
@@ -105,36 +107,30 @@ class StartupSerializer(serializers.ModelSerializer):
             'total_liabilities',
             'shareholder_equity',
             'cash_flow',
-            'current_revenue',           # Missing field
-            'previous_revenue',          # Missing field
-            'investment_flow',           # Missing field
-            'financing_flow',            # Missing field
-            'reporting_period',          # Missing field
+            'current_revenue',
+            'previous_revenue',
+            'investment_flow',
+            'financing_flow',
+            'reporting_period',
             'funding_ask',
             'source_deck_id',
+            'is_deck_builder',
             'team_strength',
             'market_position',
             'brand_reputation',
             'confidence_percentage',
-            'reward_potential',    
+            'reward_potential',
             'projected_return',
             'owner_email',
             'created_at',
             'updated_at',
-            
-            
         ]
-        extra_kwargs = {
-            'company_description': {'required': False, 'allow_blank': True},
-            'team_strength': {'required': False, 'allow_blank': True},
-            'market_position': {'required': False, 'allow_blank': True},
-            'brand_reputation': {'required': False, 'allow_blank': True},
-            'current_revenue': {'required': False, 'allow_null': True},
-            'previous_revenue': {'required': False, 'allow_null': True},
-            'investment_flow': {'required': False, 'allow_null': True},
-            'financing_flow': {'required': False, 'allow_null': True},
-            'reporting_period': {'required': False, 'allow_blank': True},
-        }
+
+    def get_display_industry(self, obj):
+        if obj.is_deck_builder and obj.industry:
+            return obj.industry
+        return "—"
+
     def get_reward_potential(self, obj):
         if obj.revenue and obj.net_income:
             try:

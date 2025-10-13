@@ -16,7 +16,35 @@ from rest_framework.generics import ListAPIView
 from django.db.models import F, Value, FloatField, ExpressionWrapper, Case, When
 import uuid
 from rest_framework.generics import RetrieveAPIView
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from .serializers import UserSerializer
+from rest_framework.response import Response
+from rest_framework.views import APIView
+from rest_framework import status
+from rest_framework.response import Response
+from rest_framework.views import APIView
+from rest_framework import status
+from .models import Startup, FinancialProjection
+from .serializers import FinancialProjectionSerializer
+from rest_framework.response import Response
+from rest_framework.views import APIView
+from .models import Startup, Deck, FinancialProjection
+from .serializers import DeckDetailSerializer, FinancialProjectionSerializer
+from rest_framework.permissions import AllowAny
 
+class StartupFinancialsView(APIView):
+    def get(self, request, startup_id):
+        try:
+            startup = Startup.objects.get(pk=startup_id)
+        except Startup.DoesNotExist:
+            return Response({'detail': 'Startup not found.'}, status=status.HTTP_404_NOT_FOUND)
+        financials = FinancialProjection.objects.filter(deck=startup.source_deck)
+        serializer = FinancialProjectionSerializer(financials, many=True)
+        return Response(serializer.data)
+
+    
 # 3rd-party
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -1037,6 +1065,76 @@ class StartupListView(ListAPIView):
 class StartupDetailView(RetrieveAPIView):
     queryset = Startup.objects.all()
     serializer_class = StartupSerializer
+
+class CurrentUserView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        serializer = UserSerializer(request.user)
+        return Response(serializer.data)
+    
+class StartupFinancialsView(APIView):
+    def get(self, request, startup_id):
+        try:
+            startup = Startup.objects.get(id=startup_id)
+        except Startup.DoesNotExist:
+            return Response({'error': 'Startup not found'}, status=404)
+
+        data = {
+            'revenue': startup.revenue,
+            'net_income': startup.net_income,
+            'total_assets': startup.total_assets,
+            'total_liabilities': startup.total_liabilities,
+            'cash_flow': startup.cash_flow,
+        }
+        return Response(data)
+    
+class StartupProfileView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request, startup_id):
+        try:
+            startup = Startup.objects.select_related("source_deck").get(pk=startup_id)
+        except Startup.DoesNotExist:
+            return Response({"detail": "Startup not found."}, status=404)
+
+        deck = startup.source_deck
+        if not deck:
+            return Response({"detail": "No pitch deck linked to this startup."}, status=404)
+
+        serialized = DeckDetailSerializer(deck).data
+        response = {
+            "company_name": deck.company_name,
+            "company_description": deck.tagline or "",
+            "problem": serialized.get("problem", {}).get("description"),
+            "solution": serialized.get("solution", {}).get("description"),
+            "primary_market": serialized.get("market_analysis", {}).get("primary_market"),
+            "target_audience": serialized.get("market_analysis", {}).get("target_audience"),
+            "market_growth": serialized.get("market_analysis", {}).get("market_growth_rate"),
+            "competitive_advantage": serialized.get("market_analysis", {}).get("competitive_advantage"),
+            "financials": serialized.get("financials", []),
+            "funding_goal": serialized.get("ask", {}).get("amount"),
+            "use_of_funds": serialized.get("ask", {}).get("usage_description"),
+            "is_in_watchlist": False,
+        }
+        return Response(response)
+
+
+class FinancialProjectionListView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request, startup_id):
+        try:
+            startup = Startup.objects.select_related("source_deck").get(pk=startup_id)
+        except Startup.DoesNotExist:
+            return Response([], status=200)
+
+        if not startup.source_deck:
+            return Response([], status=200)
+
+        financials = FinancialProjection.objects.filter(deck=startup.source_deck)
+        serializer = FinancialProjectionSerializer(financials, many=True)
+        return Response(serializer.data)
     
 # def watchlist_view(request):
 #     # Get Django user from session
@@ -1131,52 +1229,87 @@ class StartupDetailView(RetrieveAPIView):
 
 class watchlist_view(APIView):
     def get(self, request):
-        user = request.user
-        if not user.is_authenticated:
+        if not request.user.is_authenticated:
             return Response({"error": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
-
-        watchlist_items = Watchlist.objects.filter(user=user).select_related('startup')
-        comparison_sets = ComparisonSet.objects.filter(user=user).prefetch_related('startups')
-        downloaded_items = Download.objects.filter(user=user).select_related('startup')
-
-        startups_data = []
-        for item in watchlist_items:
-            startup = item.startup
-            is_deck_builder = hasattr(startup, 'source_deck') and startup.source_deck is not None
-            projected_return = calculate_projected_return(startup)
-            reward_potential, display_risk, _ = calculate_reward_potential(startup)
-
-            startups_data.append({
-                "id": startup.id,
-                "company_name": startup.company_name,
-                "industry": startup.industry,
-                "is_deck_builder": is_deck_builder,
-                "projected_return": projected_return,
-                "display_risk": display_risk,
-                "reward_potential": reward_potential
-            })
-
-        comparison_data = [{
-            "id": comp.id,
-            "startup_ids": [s.id for s in comp.startups.all()]
-        } for comp in comparison_sets]
-
-        downloaded_data = [{
-            "id": d.id,
-            "startup_id": d.startup.id,
-            "company_name": d.startup.company_name
-        } for d in downloaded_items]
-
+        
+        items = Watchlist.objects.filter(user=request.user).select_related('startup')
+        data = [{
+            "id": i.startup.id,
+            "company_name": i.startup.company_name,
+            "industry": i.startup.industry,
+            "company_description": getattr(i.startup, 'company_description', ''),
+        } for i in items]
+        
         return Response({
-            "watchlist": startups_data,
-            "comparison_sets": comparison_data,
-            "downloaded_items": downloaded_data,
-            "counts": {
-                "saved": len(startups_data),
-                "compared": comparison_sets.count(),
-                "downloaded": downloaded_items.count()
-            }
+            "results": data,  # Changed from "watchlist" to "results" for consistency
+            "count": len(data)
         }, status=status.HTTP_200_OK)
+
+class add_to_watchlist(APIView):
+    def post(self, request, startup_id):
+        if not request.user.is_authenticated:
+            return Response({"success": False, "message": "Login required"}, status=status.HTTP_401_UNAUTHORIZED)
+        
+        startup = get_object_or_404(Startup, id=startup_id)
+        obj, created = Watchlist.objects.get_or_create(user=request.user, startup=startup)
+        
+        return Response({
+            "success": True,
+            "added": created,
+            "startup_id": startup.id,
+            "message": (
+                f"{startup.company_name} added to watchlist." if created 
+                else f"{startup.company_name} already in watchlist."
+            )
+        }, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+class remove_from_watchlist(APIView):
+    def delete(self, request, startup_id):
+        if not request.user.is_authenticated:
+            return Response({"success": False, "message": "Login required"}, status=status.HTTP_401_UNAUTHORIZED)
+        
+        startup = get_object_or_404(Startup, id=startup_id)
+        deleted, _ = Watchlist.objects.filter(user=request.user, startup=startup).delete()
+        
+        return Response({
+            "success": deleted > 0,
+            "startup_id": startup.id,
+            "message": (
+                f"{startup.company_name} removed from watchlist." if deleted 
+                else f"{startup.company_name} not found in watchlist."
+            )
+        }, status=status.HTTP_200_OK)
+    
+# class watchlist_view(APIView):
+#     """Return all startups in the authenticated user's watchlist."""
+#     def get(self, request):
+#         user = request.user
+#         if not user.is_authenticated:
+#             return Response({"success": False, "message": "Unauthorized."}, status=status.HTTP_401_UNAUTHORIZED)
+
+#         items = Watchlist.objects.filter(user=user).select_related('startup')
+#         startups = [
+#             {
+#                 "id": item.startup.id,
+#                 "company_name": item.startup.company_name,
+#                 "industry": item.startup.industry,
+#                 "company_description": item.startup.company_description,
+#                 "data_source_confidence": item.startup.data_source_confidence,
+#                 "revenue": str(item.startup.revenue) if item.startup.revenue else None,
+#                 "net_income": str(item.startup.net_income) if item.startup.net_income else None,
+#                 "total_assets": str(item.startup.total_assets) if item.startup.total_assets else None,
+#                 "total_liabilities": str(item.startup.total_liabilities) if item.startup.total_liabilities else None,
+#                 "confidence_percentage": item.startup.confidence_percentage,
+#                 "added_at": item.added_at,
+#             }
+#             for item in items
+#         ]
+
+#         return Response({
+#             "success": True,
+#             "count": len(startups),
+#             "results": startups
+#         }, status=status.HTTP_200_OK)
 
 @require_POST
 @csrf_protect
@@ -1224,39 +1357,6 @@ class watchlist_view(APIView):
 #             'message': 'An error occurred while removing the startup.'
 #         }, status=500)
 
-class remove_from_watchlist(APIView):
-    def delete(self, request, startup_id):
-        user = request.user
-        if not user.is_authenticated:
-            return Response(
-                {"success": False, "message": "Please log in to continue."},
-                status=status.HTTP_401_UNAUTHORIZED
-            )
-
-        try:
-            watchlist_item = get_object_or_404(Watchlist, user=user, startup_id=startup_id)
-            company_name = watchlist_item.startup.company_name
-            watchlist_item.delete()
-
-            updated_count = Watchlist.objects.filter(user=user).count()
-
-            return Response({
-                "success": True,
-                "message": f"{company_name} has been removed from your watchlist.",
-                "updated_count": updated_count
-            }, status=status.HTTP_200_OK)
-
-        except Watchlist.DoesNotExist:
-            return Response(
-                {"success": False, "message": "This startup is not in your watchlist."},
-                status=status.HTTP_404_NOT_FOUND
-            )
-
-        except Exception:
-            return Response(
-                {"success": False, "message": "An error occurred while removing the startup."},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
 
 # Helper function to delete a comparison set
 # def delete_comparison_set(request, comparison_id):
@@ -1326,29 +1426,7 @@ def get_risk_color(confidence):
     
 #     return redirect('company_profile', startup_id=startup.id)
 
-class add_to_watchlist(APIView):
-    def post(self, request, startup_id):
-        user = request.user
-        if not user.is_authenticated:
-            return Response(
-                {"success": False, "message": "Please log in to continue."},
-                status=status.HTTP_401_UNAUTHORIZED
-            )
 
-        startup = get_object_or_404(Startup, id=startup_id)
-
-        watchlist_item, created = Watchlist.objects.get_or_create(user=user, startup=startup)
-
-        if created:
-            return Response(
-                {"success": True, "message": f"{startup.company_name} has been added to your watchlist."},
-                status=status.HTTP_201_CREATED
-            )
-        else:
-            return Response(
-                {"success": False, "message": f"{startup.company_name} is already in your watchlist."},
-                status=status.HTTP_200_OK
-            )
 
 # def remove_from_watchlist(request, startup_id):
 #     # Get Django user from session
@@ -1402,32 +1480,7 @@ class add_to_watchlist(APIView):
 #         messages.warning(request, warning_message)
 #         return redirect('company_profile', startup_id=startup.id)
 
-class remove_from_watchlist(APIView):
-    def delete(self, request, startup_id):
-        user = request.user
-        if not user.is_authenticated:
-            return Response(
-                {"success": False, "message": "Please log in to continue."},
-                status=status.HTTP_401_UNAUTHORIZED
-            )
 
-        startup = get_object_or_404(Startup, id=startup_id)
-
-        deleted_count, _ = Watchlist.objects.filter(user=user, startup=startup).delete()
-        updated_count = Watchlist.objects.filter(user=user).count()
-
-        if deleted_count > 0:
-            return Response({
-                "success": True,
-                "message": f"{startup.company_name} has been removed from your watchlist.",
-                "updated_count": updated_count
-            }, status=status.HTTP_200_OK)
-        else:
-            return Response({
-                "success": False,
-                "message": f"{startup.company_name} was not in your watchlist.",
-                "updated_count": updated_count
-            }, status=status.HTTP_404_NOT_FOUND)
         
 # def company_profile(request, startup_id):
 #     # Check if user is logged in via session

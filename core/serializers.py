@@ -84,6 +84,11 @@ class DeckSerializer(serializers.ModelSerializer):
             'logo': {'required': False, 'allow_null': True}
         }
 
+class UserSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ['id', 'username', 'email']
+
 class StartupSerializer(serializers.ModelSerializer):
     owner_email = serializers.EmailField(source='owner.user.email', read_only=True)
     source_deck_id = serializers.IntegerField(source='source_deck.id', read_only=True)
@@ -164,7 +169,6 @@ class StartupSerializer(serializers.ModelSerializer):
             except Exception:
                 return None
         return None
-
 
 
 class ProblemSerializer(serializers.ModelSerializer):

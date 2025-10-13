@@ -1,6 +1,6 @@
 from django.urls import path
 from . import views
-from .views import StartupListView, StartupDetailView
+from .views import StartupListView, StartupDetailView, CurrentUserView, StartupProfileView, FinancialProjectionListView
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -98,24 +98,65 @@ urlpatterns = [
     path('login/', views.login_view.as_view(), name='login'),
     # path('api/logout/', views.LogoutView.as_view(), name='logout'),
 
-    # Dashboard & Watchlist
+    # # Dashboard & Watchlist
+    # path('investor/dashboard/', views.dashboard.as_view(), name='dashboard'),
+    # path('startups/', StartupListView.as_view(), name='startup-list'),
+    # path('startups/<int:pk>/', StartupDetailView.as_view(), name='startup-detail'),
+    # path('investor/watchlist/', views.watchlist_view.as_view(), name='watchlist'),
+
+    # path('api/watchlist/', views.watchlist_view.as_view(), name='watchlist'),
+    # path('api/watchlist/add/<int:startup_id>/', views.add_to_watchlist.as_view(), name='add_to_watchlist'),
+    # path('api/watchlist/remove/<int:startup_id>/', views.remove_from_watchlist.as_view(), name='remove_from_watchlist'),
+
+    # # path('investor/watchlist/add/<int:startup_id>/', views.add_to_watchlist.as_view(), name='add_to_watchlist'),
+    # # path('investor/watchlist/remove/<int:startup_id>/', views.remove_from_watchlist.as_view(), name='remove_from_watchlist'),
+    # # path('watchlist/add/<int:startup_id>/', views.add_to_watchlist.as_view(), name='add_to_watchlist'),
+    # # path('watchlist/remove/<int:startup_id>/', views.remove_from_watchlist.as_view(), name='remove_from_watchlist'),
+    # # path('watchlist/', views.watchlist_view.as_view(), name='watchlist'),
+
+    # # Startup Comparison
+    # path('investor/comparison/', views.startup_comparison.as_view(), name='startup_comparison'),
+    # # path('investor/comparison/delete/<int:comparison_id>/', views.delete_comparison_set.as_view(), name='delete_comparison_set'),
+    # path('investor/comparison/delete/<int:comparison_id>/', views.delete_comparison_set, name='delete_comparison_set'),
+    # path('investor/comparison/export-pdf/', views.export_startup_comparison_pdf.as_view(), name='export_startup_comparison_pdf'),
+
+    # # Company Profile
+    # path('api/startups/<int:startup_id>/profile/', views.company_profile.as_view(), name='company_profile'),
+    # path('api/startups/<int:startup_id>/download/', views.download_company_profile_pdf.as_view(), name='download_company_profile_pdf'),
+    # path('users/me/', CurrentUserView.as_view(), name='current-user'),
+    # path('startups/<int:pk>/profile/', StartupDetailView.as_view(), name='startup-profile'),
+    # path('financials/<int:startup_id>/', views.StartupFinancialsView.as_view(), name='startup-financials'),
+    # path("api/startups/<int:startup_id>/profile/", StartupProfileView.as_view(), name="startup-profile"),
+    # path("api/financials/<int:startup_id>/", FinancialProjectionListView.as_view(), name="financials"),
+
+    # # Investment Simulation
+    # path('investor/simulation/', views.investment_simulation.as_view(), name='investment_simulation'),
+    # path('investor/simulation/<int:startup_id>/', views.investment_simulation.as_view(), name='investment_simulation_with_startup'),
+
+
+    # Dashboard & Watchlist 
     path('investor/dashboard/', views.dashboard.as_view(), name='dashboard'),
-    path('api/startups/', StartupListView.as_view(), name='startup-list'),
-    path('api/startups/<int:pk>/', StartupDetailView.as_view(), name='startup-detail'),
     path('investor/watchlist/', views.watchlist_view.as_view(), name='watchlist'),
     path('investor/watchlist/add/<int:startup_id>/', views.add_to_watchlist.as_view(), name='add_to_watchlist'),
     path('investor/watchlist/remove/<int:startup_id>/', views.remove_from_watchlist.as_view(), name='remove_from_watchlist'),
-
-    # Startup Comparison
-    path('investor/comparison/', views.startup_comparison.as_view(), name='startup_comparison'),
-    path('investor/comparison/delete/<int:comparison_id>/', views.delete_comparison_set.as_view(), name='delete_comparison_set'),
-    path('investor/comparison/export-pdf/', views.export_startup_comparison_pdf.as_view(), name='export_startup_comparison_pdf'),
-
-    # Company Profile
-    path('api/startups/<int:startup_id>/profile/', views.company_profile.as_view(), name='company_profile'),
-    path('api/startups/<int:startup_id>/profile/download-pdf/', views.download_company_profile_pdf.as_view(), name='download_company_profile_pdf'),
-
+    
+    # Startups
+    path('startups/', StartupListView.as_view(), name='startup-list'),
+    path('startups/<int:pk>/', StartupDetailView.as_view(), name='startup-detail'),
+    path('startups/<int:startup_id>/profile/', StartupProfileView.as_view(), name='startup-profile'),
+    
+    # Financials
+    path('financials/<int:startup_id>/', FinancialProjectionListView.as_view(), name='financials'),
+    
+    # Users
+    path('users/me/', CurrentUserView.as_view(), name='current-user'),
+    
     # Investment Simulation
     path('investor/simulation/', views.investment_simulation.as_view(), name='investment_simulation'),
     path('investor/simulation/<int:startup_id>/', views.investment_simulation.as_view(), name='investment_simulation_with_startup'),
+    
+    # Startup Comparison
+    path('investor/comparison/', views.startup_comparison.as_view(), name='startup_comparison'),
+    path('investor/comparison/delete/<int:comparison_id>/', views.delete_comparison_set, name='delete_comparison_set'),
+    path('investor/comparison/export-pdf/', views.export_startup_comparison_pdf.as_view(), name='export_startup_comparison_pdf'),
 ]

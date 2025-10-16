@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import RegisteredUser, Deck, Startup, Problem, Solution, MarketAnalysis, FundingAsk, TeamMember, FinancialProjection
+from .models import RegisteredUser, Deck, Startup, Problem, Solution, MarketAnalysis, FundingAsk, TeamMember, FinancialProjection, Watchlist
 from django.utils.translation import gettext_lazy as _
 from django.contrib.auth.hashers import make_password
 from django.contrib.auth import get_user_model
@@ -96,6 +96,7 @@ class StartupSerializer(serializers.ModelSerializer):
     reward_potential = serializers.SerializerMethodField()
     projected_return = serializers.SerializerMethodField()
     display_industry = serializers.SerializerMethodField()
+    is_in_watchlist = serializers.SerializerMethodField()
 
     class Meta:
         model = Startup
@@ -129,6 +130,7 @@ class StartupSerializer(serializers.ModelSerializer):
             'owner_email',
             'created_at',
             'updated_at',
+            'is_in_watchlist',
         ]
 
     def get_display_industry(self, obj):
@@ -169,6 +171,18 @@ class StartupSerializer(serializers.ModelSerializer):
             except Exception:
                 return None
         return None
+    
+    def get_is_in_watchlist(self, obj):
+        """Check if the startup is in the current user's watchlist"""
+        request = self.context.get('request')
+        
+        if not request or not request.user.is_authenticated:
+            return False
+        
+        return Watchlist.objects.filter(
+            user=request.user,
+            startup=obj
+        ).exists()
 
 
 class ProblemSerializer(serializers.ModelSerializer):

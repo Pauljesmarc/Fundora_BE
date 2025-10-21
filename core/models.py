@@ -100,11 +100,18 @@ class RegisteredUser(models.Model):
 
 class Startup(models.Model):
     """Model to store startup company data submitted by users"""
-    owner = models.ForeignKey(RegisteredUser, on_delete=models.CASCADE, related_name='startups')
+    owner = models.ForeignKey(
+        RegisteredUser, 
+        on_delete=models.CASCADE, 
+        related_name='startups',
+        null=True,
+        blank=True
+    )
     company_name = models.CharField(max_length=255)
     industry = models.CharField(max_length=255)
     company_description = models.TextField()
     data_source_confidence = models.CharField(max_length=50, default='Medium')
+    is_deck_builder = models.BooleanField(default=False)
     
     # Financial data
     revenue = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)

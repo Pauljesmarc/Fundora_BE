@@ -1,8 +1,19 @@
 from django.urls import path
 from . import views
-from .views import StartupListView, StartupDetailView, CurrentUserView, StartupProfileView, FinancialProjectionListView
+from .views import (
+    StartupListView, 
+    StartupDetailView, 
+    CurrentUserView, 
+    StartupProfileView, 
+    FinancialProjectionListView
+)
 from rest_framework.response import Response
 from rest_framework.views import APIView
+
+import inspect
+print("SaveComparisonView type:", type(getattr(views, 'SaveComparisonView', None)))
+print("SaveComparisonView is class?:", inspect.isclass(getattr(views, 'SaveComparisonView', None)))
+print("Dir of views:", [x for x in dir(views) if 'comparison' in x.lower()])
 
 class StartupRegistrationView(APIView):
     def post(self, request):
@@ -157,6 +168,7 @@ urlpatterns = [
     
     # Startup Comparison
     path('investor/comparison/', views.startup_comparison.as_view(), name='startup_comparison'),
-    path('investor/comparison/delete/<int:comparison_id>/', views.delete_comparison_set, name='delete_comparison_set'),
-    path('investor/comparison/export-pdf/', views.export_startup_comparison_pdf.as_view(), name='export_startup_comparison_pdf'),
+    path('investor/comparisons/save/', views.SaveComparisonView.as_view(), name='save_comparison'),
+    path('investor/comparisons/', views.ListComparisonsView.as_view(), name='list_comparisons'),
+    path('investor/comparisons/delete/<int:comparison_id>/', views.DeleteComparisonSetView.as_view(), name='delete_comparison_set'),
 ]

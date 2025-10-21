@@ -1,4 +1,4 @@
-from django.utils import timezone 
+from django.utils import timezone
 from django.shortcuts import render, redirect, get_object_or_404
 from django.http import HttpResponse, JsonResponse, Http404
 from django.template.loader import render_to_string
@@ -12,27 +12,21 @@ from django.utils.decorators import method_decorator
 from django.views.decorators.http import require_POST
 from django.forms import ValidationError, inlineformset_factory
 from django.db import transaction
-from rest_framework.generics import ListAPIView
 from django.db.models import F, Value, FloatField, ExpressionWrapper, Case, When
-import uuid
-from rest_framework.generics import RetrieveAPIView
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from .serializers import UserSerializer
-from rest_framework.response import Response
-from rest_framework.views import APIView
+
 from rest_framework import status
-from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework import status
-from .models import Startup, FinancialProjection
-from .serializers import FinancialProjectionSerializer
 from rest_framework.response import Response
-from rest_framework.views import APIView
+from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.generics import ListAPIView, RetrieveAPIView
+
 from .models import Startup, Deck, FinancialProjection
-from .serializers import DeckDetailSerializer, FinancialProjectionSerializer
-from rest_framework.permissions import AllowAny
+from .serializers import (
+    UserSerializer,
+    DeckDetailSerializer,
+    FinancialProjectionSerializer,
+)
+import uuid
 
 class StartupFinancialsView(APIView):
     def get(self, request, startup_id):
@@ -510,11 +504,11 @@ class deck_builder(APIView):
                     Startup.objects.create(
                         company_name=getattr(deck, "company_name", "Untitled Deck"),
                         company_description=getattr(deck, "description", ""),
-                        industry=getattr(deck, "industry", "—"),
+                        industry=getattr(deck, "tagline", "—"),
                         data_source_confidence="Medium",
                         source_deck_id=deck.id,
                         is_deck_builder=True,
-                        owner_email=request.user.email if hasattr(request.user, "email") else "unknown@fundora.local"
+                        owner=RegisteredUser.objects.get(user=request.user)
                     )
 
             return Response(
@@ -847,72 +841,163 @@ def get_tokens_for_user(user):
 
 
 class dashboard(APIView):
+    """
+    Legacy dashboard endpoint - returns startups with calculated metrics
+    """
     def get(self, request):
-        # Optional: enforce authentication
-        # if not request.user.is_authenticated:
-        #     return Response({"error": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
-
         industry = request.query_params.get('industry', '')
         risk = request.query_params.get('risk', '')
         min_return = request.query_params.get('min_return', '')
         sort_by = request.query_params.get('sort_by', 'recommended')
 
-        startups = Startup.objects.all()
+        startups = Startup.objects.select_related('owner__user', 'source_deck').all()
 
-        # Apply filters
+        # Apply industry filter
         if industry:
-            startups = startups.filter(industry=industry)
+            startups = startups.filter(industry__iexact=industry)
 
+        # Serialize and calculate metrics (including financial risk)
+        serializer = StartupSerializer(startups, many=True, context={'request': request})
+        startup_data = serializer.data
+
+        # Apply risk filter based on calculated financial risk
         if risk:
             try:
                 risk_value = int(risk)
                 if risk_value <= 33:
-                    startups = startups.filter(data_source_confidence='High')
+                    # Conservative: Low risk only
+                    startup_data = [s for s in startup_data if s.get('risk_level') == 'Low']
                 elif risk_value <= 66:
-                    startups = startups.filter(data_source_confidence='Medium')
-                else:
-                    startups = startups.filter(data_source_confidence='Low')
+                    # Balanced: Low and Medium risk
+                    startup_data = [s for s in startup_data if s.get('risk_level') in ['Low', 'Medium']]
+                # else: Aggressive: show all risk levels
             except ValueError:
                 pass
 
-        # Annotate each startup with projected return and reward potential
-        startup_data = []
-        for s in startups:
-            projected_return = calculate_projected_return(s)
-            reward_potential, display_risk, is_deck_builder = calculate_reward_potential(s)
-
-            if min_return:
-                try:
-                    if projected_return is None or projected_return < float(min_return):
-                        continue
-                except ValueError:
-                    pass
-
-            startup_data.append({
-                "id": s.id,
-                "company_name": s.company_name,
-                "industry": s.industry,
-                "projected_return": projected_return,
-                "reward_potential": reward_potential,
-                "confidence": s.data_source_confidence,
-                "display_risk": display_risk,
-                "is_deck_builder": is_deck_builder
-            })
+        # Apply min_return filter (post-serialization)
+        if min_return:
+            try:
+                min_ret_val = float(min_return)
+                startup_data = [
+                    s for s in startup_data
+                    if s.get('projected_return') is not None 
+                    and s.get('projected_return') >= min_ret_val
+                ]
+            except ValueError:
+                pass
 
         # Apply sorting
         startup_data = sort_startups(startup_data, sort_by)
 
         return Response({
             "startups": startup_data,
-            "selected_industry": industry,
-            "selected_risk": risk or '50'
+            "count": len(startup_data),
         }, status=status.HTTP_200_OK)
     
 # Helper functions for calculations and sorting
 
+def calculate_financial_risk(startup):
+    """
+    Calculate financial risk level based on multiple financial metrics:
+    - Debt-to-Equity Ratio: measures financial leverage
+    - Current Ratio: measures liquidity (current assets / current liabilities)
+    - Profit Margin: measures profitability
+    - Debt-to-Assets Ratio: measures solvency
+    
+    Returns: 'Low', 'Medium', or 'High' risk level
+    """
+    try:
+        # Extract financial data
+        equity = float(startup.shareholder_equity or 0)
+        liabilities = float(startup.total_liabilities or 0)
+        assets = float(startup.total_assets or 0)
+        revenue = float(startup.revenue or 0)
+        net_income = float(startup.net_income or 0)
+        current_assets = float(getattr(startup, 'current_assets', assets * 0.6) or 0)  # Estimate if not available
+        current_liabilities = float(getattr(startup, 'current_liabilities', liabilities * 0.5) or 0)  # Estimate if not available
+        
+        risk_score = 0
+        risk_factors = 0
+        
+        # 1. Debt-to-Equity Ratio (higher is riskier)
+        # Low risk: < 1.0, Medium: 1.0-2.0, High: > 2.0
+        if equity > 0:
+            debt_to_equity = liabilities / equity
+            if debt_to_equity < 1.0:
+                risk_score += 1  # Low risk
+            elif debt_to_equity < 2.0:
+                risk_score += 2  # Medium risk
+            else:
+                risk_score += 3  # High risk
+            risk_factors += 1
+        
+        # 2. Debt-to-Assets Ratio (higher is riskier)
+        # Low risk: < 0.4, Medium: 0.4-0.6, High: > 0.6
+        if assets > 0:
+            debt_to_assets = liabilities / assets
+            if debt_to_assets < 0.4:
+                risk_score += 1
+            elif debt_to_assets < 0.6:
+                risk_score += 2
+            else:
+                risk_score += 3
+            risk_factors += 1
+        
+        # 3. Current Ratio (liquidity - lower is riskier)
+        # Low risk: > 2.0, Medium: 1.0-2.0, High: < 1.0
+        if current_liabilities > 0:
+            current_ratio = current_assets / current_liabilities
+            if current_ratio >= 2.0:
+                risk_score += 1
+            elif current_ratio >= 1.0:
+                risk_score += 2
+            else:
+                risk_score += 3
+            risk_factors += 1
+        
+        # 4. Profit Margin (negative is riskier)
+        # Low risk: > 10%, Medium: 0-10%, High: < 0%
+        if revenue > 0:
+            profit_margin = (net_income / revenue) * 100
+            if profit_margin > 10:
+                risk_score += 1
+            elif profit_margin >= 0:
+                risk_score += 2
+            else:
+                risk_score += 3
+            risk_factors += 1
+        
+        # 5. Net Income (negative is riskier)
+        if net_income > 0:
+            risk_score += 1
+        elif net_income == 0:
+            risk_score += 2
+        else:
+            risk_score += 3
+        risk_factors += 1
+        
+        # Calculate average risk score
+        if risk_factors == 0:
+            return 'Medium'  # Default if no data
+        
+        avg_risk = risk_score / risk_factors
+        
+        # Map to risk levels
+        if avg_risk <= 1.5:
+            return 'Low'
+        elif avg_risk <= 2.3:
+            return 'Medium'
+        else:
+            return 'High'
+            
+    except Exception as e:
+        # If calculation fails, return Medium risk as default
+        return 'Medium'
+
+
 def calculate_projected_return(startup):
     """
-    Projected Return ≈ Net Income / Shareholder Equity
+    Projected Return ≈ Net Income / Shareholder Equity (ROE)
     If equity ≤ 0, fall back to ROA = Net Income / Total Assets.
     Expressed as percentage.
     """
@@ -935,7 +1020,7 @@ def calculate_reward_potential(startup):
     Reward Potential = normalized composite of:
     - Profit Margin (Net Income / Revenue)
     - Return on Assets (Net Income / Total Assets)
-    - Debt Ratio (Liabilities / Assets)
+    - Growth potential indicators
     Output scaled 1–5.
     """
     try:
@@ -945,122 +1030,162 @@ def calculate_reward_potential(startup):
         liab = float(startup.total_liabilities or 0)
 
         if rev <= 0 or assets <= 0:
-            return 3.0, getattr(startup, 'data_source_confidence', 'Medium'), False
+            return 3.0
 
         profit_margin = income / rev
         roa = income / assets
-        debt_ratio = liab / assets
 
         # Base score by profitability and efficiency
         base = (profit_margin * 3 + roa * 2) * 100  # weighted blend
         base = max(min(base, 100), -100)
 
-        # Risk adjustment by leverage
-        risk_adj = 1.0 - min(debt_ratio, 2.0) * 0.25
-        adjusted = base * risk_adj
+        # Debt consideration (higher debt reduces potential)
+        debt_ratio = liab / assets if assets > 0 else 0
+        debt_adjustment = 1.0 - min(debt_ratio, 1.0) * 0.3
+
+        adjusted = base * debt_adjustment
 
         # Map to 1–5 scale
         if adjusted >= 60:
-            score = 4.5
-        elif adjusted >= 30:
-            score = 3.5
+            score = 5.0
+        elif adjusted >= 40:
+            score = 4.0
+        elif adjusted >= 20:
+            score = 3.0
         elif adjusted > 0:
-            score = 2.5
+            score = 2.0
         else:
-            score = 1.5
+            score = 1.0
 
-        return round(score, 1), getattr(startup, 'data_source_confidence', 'Medium'), False
+        return round(score, 1)
     except Exception:
-        return 3.0, getattr(startup, 'data_source_confidence', 'Medium'), False
+        return 3.0
 
 
-def sort_startups(startups, sort_by):    
+def sort_startups(startups, sort_by):
+    """
+    Sort startup list by various criteria
+    Works with serialized data (dicts)
+    """
     if sort_by == 'projected_return_desc':
-        return sorted(startups, key=lambda x: x.get("projected_return") or 0, reverse=True)
+        return sorted(startups, key=lambda x: x.get("projected_return") or -999999, reverse=True)
     elif sort_by == 'projected_return_asc':
-        return sorted(startups, key=lambda x: x.get("projected_return") or 0)
+        return sorted(startups, key=lambda x: x.get("projected_return") or 999999)
     elif sort_by == 'reward_potential_desc':
         return sorted(startups, key=lambda x: x.get("reward_potential") or 0, reverse=True)
     elif sort_by == 'confidence_desc':
         confidence_order = {'High': 3, 'Medium': 2, 'Low': 1}
-        return sorted(startups, key=lambda x: confidence_order.get(x.get("confidence"), 0), reverse=True)
+        return sorted(startups, key=lambda x: confidence_order.get(x.get("data_source_confidence"), 0), reverse=True)
     elif sort_by == 'risk_asc':
-        confidence_order = {'High': 1, 'Medium': 2, 'Low': 3}  # High confidence = low risk
-        return sorted(startups, key=lambda x: confidence_order.get(x.get("confidence"), 2))
+        # Sort by financial risk (Low < Medium < High)
+        risk_order = {'Low': 1, 'Medium': 2, 'High': 3}
+        return sorted(startups, key=lambda x: risk_order.get(x.get("risk_level"), 2))
     elif sort_by == 'company_name':
         return sorted(startups, key=lambda x: x.get("company_name", "").lower())
+    
+    # Default: return as-is (already ordered by created_at desc from queryset)
     return startups
 
 class StartupListView(ListAPIView):
+    """
+    API endpoint to list startups with filtering and sorting.
+    Uses existing StartupSerializer which calculates metrics on-the-fly.
+    """
     serializer_class = StartupSerializer
-    # let get_queryset build query dynamically
-
+    
+    def get_serializer_context(self):
+        """Pass request to serializer for is_in_watchlist field"""
+        context = super().get_serializer_context()
+        context['request'] = self.request
+        return context
+    
     def get_queryset(self):
-        qs = Startup.objects.all()
-
-        # annotated projected_return (safe: only compute when revenue > 0)
-        proj_expr = ExpressionWrapper(F('net_income') * Value(100.0) / F('revenue'),
-                                     output_field=FloatField())
-        projected_return_case = Case(
-            When(revenue__isnull=False, revenue__gt=0, then=proj_expr),
-            default=Value(None),
-            output_field=FloatField()
-        )
-        qs = qs.annotate(projected_return=projected_return_case)
-
-        # annotate reward_potential using same breakpoints used in serializer
-        reward_case = Case(
-            When(projected_return__gt=30, then=Value(5)),
-            When(projected_return__gt=20, then=Value(4)),
-            When(projected_return__gt=10, then=Value(3)),
-            When(projected_return__gt=0, then=Value(2)),
-            default=Value(1),
-            output_field=FloatField()
-        )
-        qs = qs.annotate(reward_potential=reward_case)
+        qs = Startup.objects.select_related('owner__user', 'source_deck').all()
 
         params = self.request.query_params
 
-        # ---- filters ----
+        # ---- FILTERS ----
+        
+        # Industry filter (case-insensitive)
         industry = params.get('industry')
         if industry:
             qs = qs.filter(industry__iexact=industry)
 
+        # Minimum return filter - applied post-serialization
         min_return = params.get('min_return')
-        if min_return:
-            try:
-                mr = float(min_return)
-                qs = qs.filter(projected_return__gte=mr)
-            except (ValueError, TypeError):
-                pass
+        self._min_return_filter = float(min_return) if min_return else None
 
-        # risk slider (0-100) maps to confidence_percentage threshold
+        # Risk slider (0-100) - applied post-serialization based on calculated financial risk
         risk = params.get('risk')
-        if risk:
-            try:
-                r = int(risk)
-                # keep interpretation simple: only show startups with confidence >= r
-                qs = qs.filter(confidence_percentage__gte=r)
-            except (ValueError, TypeError):
-                pass
+        self._risk_filter = int(risk) if risk else None
 
-        # ---- sorting ----
+        # ---- SORTING ----
         sort_by = params.get('sort_by')
-        order_map = {
-            'projected_return_desc': '-projected_return',
-            'projected_return_asc': 'projected_return',
-            'reward_potential_desc': '-reward_potential',
-            'confidence_desc': '-confidence_percentage',
-            'risk_asc': 'confidence_percentage',
-            'company_name': 'company_name',
-        }
-        ordering = order_map.get(sort_by)
-        if ordering:
-            qs = qs.order_by(ordering)
+        
+        # For sorts that don't depend on calculated fields, use database ordering
+        if sort_by == 'confidence_desc':
+            # Sort by data source confidence: High > Medium > Low
+            confidence_order = Case(
+                When(data_source_confidence='High', then=Value(3)),
+                When(data_source_confidence='Medium', then=Value(2)),
+                When(data_source_confidence='Low', then=Value(1)),
+                default=Value(0),
+                output_field=FloatField()
+            )
+            qs = qs.annotate(confidence_order=confidence_order).order_by('-confidence_order')
+        elif sort_by == 'company_name':
+            qs = qs.order_by('company_name')
         else:
+            # For projected_return, reward_potential, and risk_level sorting,
+            # we'll sort after serialization since these are calculated fields
+            # Default: newest first
             qs = qs.order_by('-created_at')
+        
+        # Store sort preference for post-serialization sorting
+        self._sort_by = sort_by
 
         return qs
+    
+    def list(self, request, *args, **kwargs):
+        """Override list to apply post-serialization filtering and sorting"""
+        queryset = self.filter_queryset(self.get_queryset())
+        
+        serializer = self.get_serializer(queryset, many=True)
+        data = serializer.data
+        
+        # Apply financial risk filter (post-serialization)
+        if hasattr(self, '_risk_filter') and self._risk_filter is not None:
+            risk_value = self._risk_filter
+            if risk_value <= 33:
+                # Conservative: Low risk only
+                data = [item for item in data if item.get('risk_level') == 'Low']
+            elif risk_value <= 66:
+                # Balanced: Low and Medium risk
+                data = [item for item in data if item.get('risk_level') in ['Low', 'Medium']]
+            # else: Aggressive: show all risk levels
+        
+        # Apply min_return filter (post-serialization)
+        if hasattr(self, '_min_return_filter') and self._min_return_filter is not None:
+            data = [
+                item for item in data 
+                if item.get('projected_return') is not None 
+                and item.get('projected_return') >= self._min_return_filter
+            ]
+        
+        # Apply sorting that requires calculated fields
+        sort_by = getattr(self, '_sort_by', None)
+        if sort_by == 'projected_return_desc':
+            data = sorted(data, key=lambda x: x.get('projected_return') or -999999, reverse=True)
+        elif sort_by == 'projected_return_asc':
+            data = sorted(data, key=lambda x: x.get('projected_return') or 999999)
+        elif sort_by == 'reward_potential_desc':
+            data = sorted(data, key=lambda x: x.get('reward_potential') or 0, reverse=True)
+        elif sort_by == 'risk_asc':
+            # Sort by financial risk (Low < Medium < High)
+            risk_order = {'Low': 1, 'Medium': 2, 'High': 3}
+            data = sorted(data, key=lambda x: risk_order.get(x.get('risk_level'), 2))
+        
+        return Response(data)
     
 class StartupDetailView(RetrieveAPIView):
     queryset = Startup.objects.all()
@@ -1241,7 +1366,7 @@ class watchlist_view(APIView):
         } for i in items]
         
         return Response({
-            "results": data,  # Changed from "watchlist" to "results" for consistency
+            "results": data,
             "count": len(data)
         }, status=status.HTTP_200_OK)
 
@@ -1310,9 +1435,6 @@ class remove_from_watchlist(APIView):
 #             "count": len(startups),
 #             "results": startups
 #         }, status=status.HTTP_200_OK)
-
-@require_POST
-@csrf_protect
 # def remove_from_watchlist(request, startup_id):
 #     """
 #     Remove a startup from the user's watchlist via AJAX
@@ -1358,33 +1480,111 @@ class remove_from_watchlist(APIView):
 #         }, status=500)
 
 
-# Helper function to delete a comparison set
-# def delete_comparison_set(request, comparison_id):
-#     # Get Django user from session
-#     django_user = get_django_user_from_session(request)
-#     if not django_user:
-#         return redirect('login')
-    
-#     if request.method == 'POST':
-#         try:
-#             comparison_set = ComparisonSet.objects.get(id=comparison_id, user=django_user)
-#             comparison_set.delete()
-#         except ComparisonSet.DoesNotExist:
-#             pass
-#     return redirect('watchlist')
+class SaveComparisonView(APIView):
+    """Save a comparison set for the authenticated user"""
+    def post(self, request):
+        if not request.user.is_authenticated:
+            return Response(
+                {"error": "Authentication required"}, 
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+        
+        startup_ids = request.data.get('startup_ids', [])
+        
+        if not startup_ids or len(startup_ids) < 2:
+            return Response(
+                {"error": "At least 2 startups are required for comparison"}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Verify all startups exist
+        startups = Startup.objects.filter(id__in=startup_ids)
+        if startups.count() != len(startup_ids):
+            return Response(
+                {"error": "One or more startups not found"}, 
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        # Check if this exact comparison already exists
+        existing = ComparisonSet.objects.filter(user=request.user)
+        for comp in existing:
+            existing_ids = set(comp.startups.values_list('id', flat=True))
+            if existing_ids == set(startup_ids):
+                return Response({
+                    "success": True,
+                    "message": "This comparison already exists",
+                    "id": comp.id,
+                    "already_exists": True
+                }, status=status.HTTP_200_OK)
+        
+        # Create new comparison set
+        comparison = ComparisonSet.objects.create(user=request.user)
+        comparison.startups.set(startups)
+        
+        return Response({
+            "success": True,
+            "message": "Comparison saved successfully",
+            "id": comparison.id,
+            "already_exists": False
+        }, status=status.HTTP_201_CREATED)
 
-class delete_comparison_set(APIView):
+
+class ListComparisonsView(APIView):
+    """List all saved comparisons for the authenticated user"""
+    def get(self, request):
+        if not request.user.is_authenticated:
+            return Response(
+                {"error": "Authentication required"}, 
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+        
+        comparisons = ComparisonSet.objects.filter(user=request.user).prefetch_related('startups')
+        
+        results = []
+        for comp in comparisons:
+            startups_data = StartupSerializer(
+                comp.startups.all(), 
+                many=True,
+                context={'request': request}
+            ).data
+            
+            results.append({
+                "id": comp.id,
+                "startups": startups_data,
+                "startup_count": comp.startup_count,
+                "created_at": comp.created_at.isoformat(),
+                "name": comp.name or str(comp)
+            })
+        
+        return Response({
+            "results": results,
+            "count": len(results)
+        }, status=status.HTTP_200_OK)
+
+
+class DeleteComparisonSetView(APIView):
+    """Delete a saved comparison set"""
     def delete(self, request, comparison_id):
-        user = request.user
-        if not user.is_authenticated:
-            return Response({"error": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
-
+        if not request.user.is_authenticated:
+            return Response(
+                {"error": "Authentication required"}, 
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+        
         try:
-            comparison_set = ComparisonSet.objects.get(id=comparison_id, user=user)
-            comparison_set.delete()
-            return Response({"message": "Comparison set deleted successfully"}, status=status.HTTP_200_OK)
+            comparison = ComparisonSet.objects.get(id=comparison_id, user=request.user)
+            comparison_name = str(comparison)
+            comparison.delete()
+            
+            return Response({
+                "success": True,
+                "message": f"Comparison '{comparison_name}' removed successfully"
+            }, status=status.HTTP_200_OK)
         except ComparisonSet.DoesNotExist:
-            return Response({"error": "Comparison set not found"}, status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {"error": "Comparison not found"}, 
+                status=status.HTTP_404_NOT_FOUND
+            )
 
 def get_risk_level(confidence):
     """Helper function to get risk level based on confidence"""
@@ -2492,231 +2692,231 @@ class compare_startups(APIView):
 
 
 
-class export_startup_comparison_pdf(APIView):
-    permission_classes = [IsAuthenticated]
+# class export_startup_comparison_pdf(APIView):
+#     permission_classes = [IsAuthenticated]
 
-    def get(self, request):
-        startup_ids = request.query_params.get('startups', '')
-        if not startup_ids:
-            return Response({'error': 'No startups selected'}, status=400)
+#     def get(self, request):
+#         startup_ids = request.query_params.get('startups', '')
+#         if not startup_ids:
+#             return Response({'error': 'No startups selected'}, status=400)
 
-        try:
-            startup_ids = [int(id.strip()) for id in startup_ids.split(',') if id.strip()]
-        except ValueError:
-            return Response({'error': 'Invalid startup IDs'}, status=400)
+#         try:
+#             startup_ids = [int(id.strip()) for id in startup_ids.split(',') if id.strip()]
+#         except ValueError:
+#             return Response({'error': 'Invalid startup IDs'}, status=400)
 
-        if len(startup_ids) < 2 or len(startup_ids) > 3:
-            return Response({'error': 'Select 2–3 startups for comparison'}, status=400)
+#         if len(startup_ids) < 2 or len(startup_ids) > 3:
+#             return Response({'error': 'Select 2–3 startups for comparison'}, status=400)
 
-        watchlist_ids = Watchlist.objects.filter(user=request.user).values_list('startup_id', flat=True)
-        valid_ids = [id for id in startup_ids if id in watchlist_ids]
+#         watchlist_ids = Watchlist.objects.filter(user=request.user).values_list('startup_id', flat=True)
+#         valid_ids = [id for id in startup_ids if id in watchlist_ids]
 
-        if len(valid_ids) < 2:
-            return Response({'error': 'Invalid startup selection'}, status=400)
+#         if len(valid_ids) < 2:
+#             return Response({'error': 'Invalid startup selection'}, status=400)
 
-        startups = []
-        for sid in valid_ids:
-            try:
-                startup = Startup.objects.get(id=sid)
-                startup.projected_return = calculate_projected_return(startup)
-                reward, risk_label, _ = calculate_reward_potential(startup)
-                startup.reward_potential = reward
-                startup.risk_level = get_risk_level(startup.data_source_confidence)
-                startups.append(startup)
-            except Startup.DoesNotExist:
-                continue
+#         startups = []
+#         for sid in valid_ids:
+#             try:
+#                 startup = Startup.objects.get(id=sid)
+#                 startup.projected_return = calculate_projected_return(startup)
+#                 reward, risk_label, _ = calculate_reward_potential(startup)
+#                 startup.reward_potential = reward
+#                 startup.risk_level = get_risk_level(startup.data_source_confidence)
+#                 startups.append(startup)
+#             except Startup.DoesNotExist:
+#                 continue
 
-        if len(startups) < 2:
-            return Response({'error': 'Insufficient startups for comparison'}, status=400)
+#         if len(startups) < 2:
+#             return Response({'error': 'Insufficient startups for comparison'}, status=400)
 
-        try:
-            pdf_buffer = generate_comparison_pdf(startups, request.user)
-            response = HttpResponse(pdf_buffer.getvalue(), content_type='application/pdf')
-            timestamp = timezone.now().strftime("%Y%m%d_%H%M%S")
-            response['Content-Disposition'] = f'attachment; filename="startup_comparison_{timestamp}.pdf"'
-            return response
-        except Exception as e:
-            return Response({'error': f'PDF generation failed: {str(e)}'}, status=500)
+#         try:
+#             pdf_buffer = generate_comparison_pdf(startups, request.user)
+#             response = HttpResponse(pdf_buffer.getvalue(), content_type='application/pdf')
+#             timestamp = timezone.now().strftime("%Y%m%d_%H%M%S")
+#             response['Content-Disposition'] = f'attachment; filename="startup_comparison_{timestamp}.pdf"'
+#             return response
+#         except Exception as e:
+#             return Response({'error': f'PDF generation failed: {str(e)}'}, status=500)
 
-def generate_comparison_pdf(startups, user):
-    """Generate PDF comparison report"""
-    buffer = BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=A4, 
-                          rightMargin=72, leftMargin=72,
-                          topMargin=72, bottomMargin=18)
+# def generate_comparison_pdf(startups, user):
+#     """Generate PDF comparison report"""
+#     buffer = BytesIO()
+#     doc = SimpleDocTemplate(buffer, pagesize=A4, 
+#                           rightMargin=72, leftMargin=72,
+#                           topMargin=72, bottomMargin=18)
     
-    # Define styles
-    styles = getSampleStyleSheet()
-    title_style = ParagraphStyle(
-        'CustomTitle',
-        parent=styles['Heading1'],
-        fontSize=24,
-        spaceAfter=30,
-        alignment=TA_CENTER,
-        textColor=colors.HexColor('#1f2937')
-    )
+#     # Define styles
+#     styles = getSampleStyleSheet()
+#     title_style = ParagraphStyle(
+#         'CustomTitle',
+#         parent=styles['Heading1'],
+#         fontSize=24,
+#         spaceAfter=30,
+#         alignment=TA_CENTER,
+#         textColor=colors.HexColor('#1f2937')
+#     )
     
-    subtitle_style = ParagraphStyle(
-        'CustomSubtitle',
-        parent=styles['Heading2'],
-        fontSize=16,
-        spaceAfter=20,
-        alignment=TA_CENTER,
-        textColor=colors.HexColor('#6b7280')
-    )
+#     subtitle_style = ParagraphStyle(
+#         'CustomSubtitle',
+#         parent=styles['Heading2'],
+#         fontSize=16,
+#         spaceAfter=20,
+#         alignment=TA_CENTER,
+#         textColor=colors.HexColor('#6b7280')
+#     )
     
-    heading_style = ParagraphStyle(
-        'CustomHeading',
-        parent=styles['Heading2'],
-        fontSize=14,
-        spaceAfter=12,
-        textColor=colors.HexColor('#374151')
-    )
+#     heading_style = ParagraphStyle(
+#         'CustomHeading',
+#         parent=styles['Heading2'],
+#         fontSize=14,
+#         spaceAfter=12,
+#         textColor=colors.HexColor('#374151')
+#     )
     
-    # Build PDF content
-    story = []
+#     # Build PDF content
+#     story = []
     
-    # Title
-    story.append(Paragraph("Startup Comparison Report", title_style))
-    story.append(Paragraph(f"Generated on {timezone.now().strftime('%B %d, %Y')}", subtitle_style))
-    story.append(Spacer(1, 20))
+#     # Title
+#     story.append(Paragraph("Startup Comparison Report", title_style))
+#     story.append(Paragraph(f"Generated on {timezone.now().strftime('%B %d, %Y')}", subtitle_style))
+#     story.append(Spacer(1, 20))
     
-    # Company Overview Section
-    story.append(Paragraph("Company Overview", heading_style))
+#     # Company Overview Section
+#     story.append(Paragraph("Company Overview", heading_style))
     
-    # Company overview table
-    overview_data = [['Company', 'Industry', 'Risk Level']]
-    for startup in startups:
-        overview_data.append([
-            startup.company_name,
-            startup.industry or 'Unknown',
-            startup.risk_level
-        ])
+#     # Company overview table
+#     overview_data = [['Company', 'Industry', 'Risk Level']]
+#     for startup in startups:
+#         overview_data.append([
+#             startup.company_name,
+#             startup.industry or 'Unknown',
+#             startup.risk_level
+#         ])
     
-    overview_table = Table(overview_data, colWidths=[2.5*inch, 2*inch, 1.5*inch])
-    overview_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#f3f4f6')),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.HexColor('#1f2937')),
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, 0), 12),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-        ('BACKGROUND', (0, 1), (-1, -1), colors.white),
-        ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#e5e7eb')),
-        ('FONTSIZE', (0, 1), (-1, -1), 10),
-        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f9fafb')])
-    ]))
+#     overview_table = Table(overview_data, colWidths=[2.5*inch, 2*inch, 1.5*inch])
+#     overview_table.setStyle(TableStyle([
+#         ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#f3f4f6')),
+#         ('TEXTCOLOR', (0, 0), (-1, 0), colors.HexColor('#1f2937')),
+#         ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+#         ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+#         ('FONTSIZE', (0, 0), (-1, 0), 12),
+#         ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+#         ('BACKGROUND', (0, 1), (-1, -1), colors.white),
+#         ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#e5e7eb')),
+#         ('FONTSIZE', (0, 1), (-1, -1), 10),
+#         ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f9fafb')])
+#     ]))
     
-    story.append(overview_table)
-    story.append(Spacer(1, 30))
+#     story.append(overview_table)
+#     story.append(Spacer(1, 30))
     
-    # Financial Metrics Section
-    story.append(Paragraph("Financial Metrics Comparison", heading_style))
+#     # Financial Metrics Section
+#     story.append(Paragraph("Financial Metrics Comparison", heading_style))
     
-    # Financial metrics table
-    metrics_data = [['Metric'] + [startup.company_name for startup in startups]]
+#     # Financial metrics table
+#     metrics_data = [['Metric'] + [startup.company_name for startup in startups]]
     
-    # Projected Return row
-    projected_returns = [f"+{startup.projected_return}%" for startup in startups]
-    metrics_data.append(['Projected Return'] + projected_returns)
+#     # Projected Return row
+#     projected_returns = [f"+{startup.projected_return}%" for startup in startups]
+#     metrics_data.append(['Projected Return'] + projected_returns)
     
-    # Reward Potential row
-    reward_potentials = [f"{startup.reward_potential}/5" for startup in startups]
-    metrics_data.append(['Reward Potential'] + reward_potentials)
+#     # Reward Potential row
+#     reward_potentials = [f"{startup.reward_potential}/5" for startup in startups]
+#     metrics_data.append(['Reward Potential'] + reward_potentials)
     
-    # Data Confidence row
-    data_confidence = [getattr(startup, 'data_source_confidence', 'Medium') for startup in startups]
-    metrics_data.append(['Data Confidence'] + data_confidence)
+#     # Data Confidence row
+#     data_confidence = [getattr(startup, 'data_source_confidence', 'Medium') for startup in startups]
+#     metrics_data.append(['Data Confidence'] + data_confidence)
     
-    # Calculate column widths
-    num_startups = len(startups)
-    company_col_width = 4.5 / num_startups
-    metrics_table = Table(metrics_data, colWidths=[1.5*inch] + [company_col_width*inch] * num_startups)
+#     # Calculate column widths
+#     num_startups = len(startups)
+#     company_col_width = 4.5 / num_startups
+#     metrics_table = Table(metrics_data, colWidths=[1.5*inch] + [company_col_width*inch] * num_startups)
     
-    # Apply table styling
-    metrics_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#f3f4f6')),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.HexColor('#1f2937')),
-        ('ALIGN', (0, 0), (0, -1), 'LEFT'),
-        ('ALIGN', (1, 0), (-1, -1), 'CENTER'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTNAME', (0, 1), (0, -1), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, 0), 12),
-        ('FONTSIZE', (0, 1), (-1, -1), 10),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-        ('BACKGROUND', (0, 1), (-1, -1), colors.white),
-        ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#e5e7eb')),
-        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f9fafb')])
-    ]))
+#     # Apply table styling
+#     metrics_table.setStyle(TableStyle([
+#         ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#f3f4f6')),
+#         ('TEXTCOLOR', (0, 0), (-1, 0), colors.HexColor('#1f2937')),
+#         ('ALIGN', (0, 0), (0, -1), 'LEFT'),
+#         ('ALIGN', (1, 0), (-1, -1), 'CENTER'),
+#         ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+#         ('FONTNAME', (0, 1), (0, -1), 'Helvetica-Bold'),
+#         ('FONTSIZE', (0, 0), (-1, 0), 12),
+#         ('FONTSIZE', (0, 1), (-1, -1), 10),
+#         ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+#         ('BACKGROUND', (0, 1), (-1, -1), colors.white),
+#         ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#e5e7eb')),
+#         ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f9fafb')])
+#     ]))
     
-    story.append(metrics_table)
-    story.append(Spacer(1, 30))
+#     story.append(metrics_table)
+#     story.append(Spacer(1, 30))
     
-    # Individual Company Details
-    story.append(Paragraph("Detailed Company Information", heading_style))
+#     # Individual Company Details
+#     story.append(Paragraph("Detailed Company Information", heading_style))
     
-    for i, startup in enumerate(startups):
-        if i > 0:
-            story.append(Spacer(1, 20))
+#     for i, startup in enumerate(startups):
+#         if i > 0:
+#             story.append(Spacer(1, 20))
         
-        # Company name
-        company_style = ParagraphStyle(
-            'CompanyName',
-            parent=styles['Heading3'],
-            fontSize=12,
-            spaceAfter=10,
-            textColor=colors.HexColor('#1f2937')
-        )
-        story.append(Paragraph(f"{startup.company_name}", company_style))
+#         # Company name
+#         company_style = ParagraphStyle(
+#             'CompanyName',
+#             parent=styles['Heading3'],
+#             fontSize=12,
+#             spaceAfter=10,
+#             textColor=colors.HexColor('#1f2937')
+#         )
+#         story.append(Paragraph(f"{startup.company_name}", company_style))
         
-        # Company details
-        details_data = [
-            ['Industry:', startup.industry or 'Unknown'],
-            ['Projected Return:', f"+{startup.projected_return}%"],
-            ['Reward Potential:', f"{startup.reward_potential}/5"],
-            ['Data Confidence:', getattr(startup, 'data_source_confidence', 'Medium')],
-            ['Risk Level:', startup.risk_level]
-        ]
+#         # Company details
+#         details_data = [
+#             ['Industry:', startup.industry or 'Unknown'],
+#             ['Projected Return:', f"+{startup.projected_return}%"],
+#             ['Reward Potential:', f"{startup.reward_potential}/5"],
+#             ['Data Confidence:', getattr(startup, 'data_source_confidence', 'Medium')],
+#             ['Risk Level:', startup.risk_level]
+#         ]
         
-        details_table = Table(details_data, colWidths=[1.5*inch, 3*inch])
-        details_table.setStyle(TableStyle([
-            ('ALIGN', (0, 0), (0, -1), 'LEFT'),
-            ('ALIGN', (1, 0), (1, -1), 'LEFT'),
-            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 10),
-            ('LEFTPADDING', (0, 0), (-1, -1), 0),
-            ('RIGHTPADDING', (0, 0), (-1, -1), 0),
-            ('TOPPADDING', (0, 0), (-1, -1), 3),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 3)
-        ]))
+#         details_table = Table(details_data, colWidths=[1.5*inch, 3*inch])
+#         details_table.setStyle(TableStyle([
+#             ('ALIGN', (0, 0), (0, -1), 'LEFT'),
+#             ('ALIGN', (1, 0), (1, -1), 'LEFT'),
+#             ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+#             ('FONTSIZE', (0, 0), (-1, -1), 10),
+#             ('LEFTPADDING', (0, 0), (-1, -1), 0),
+#             ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+#             ('TOPPADDING', (0, 0), (-1, -1), 3),
+#             ('BOTTOMPADDING', (0, 0), (-1, -1), 3)
+#         ]))
         
-        story.append(details_table)
+#         story.append(details_table)
     
-    # Footer
-    story.append(Spacer(1, 40))
-    footer_style = ParagraphStyle(
-        'Footer',
-        parent=styles['Normal'],
-        fontSize=8,
-        alignment=TA_CENTER,
-        textColor=colors.HexColor('#6b7280')
-    )
-    story.append(Paragraph("Generated by Fundora - Startup Investment Platform", footer_style))
-    story.append(Paragraph(f"Report created for {user.username} on {timezone.now().strftime('%B %d, %Y at %I:%M %p')}", footer_style))
+#     # Footer
+#     story.append(Spacer(1, 40))
+#     footer_style = ParagraphStyle(
+#         'Footer',
+#         parent=styles['Normal'],
+#         fontSize=8,
+#         alignment=TA_CENTER,
+#         textColor=colors.HexColor('#6b7280')
+#     )
+#     story.append(Paragraph("Generated by Fundora - Startup Investment Platform", footer_style))
+#     story.append(Paragraph(f"Report created for {user.username} on {timezone.now().strftime('%B %d, %Y at %I:%M %p')}", footer_style))
     
-    # Build PDF
-    doc.build(story)
-    buffer.seek(0)
-    return buffer
+#     # Build PDF
+#     doc.build(story)
+#     buffer.seek(0)
+#     return buffer
 
-def get_risk_level(confidence):
-    """Helper function to get risk level based on confidence"""
-    if confidence == 'High':
-        return 'Low Risk'
-    elif confidence == 'Medium':
-        return 'Medium Risk'
-    else:
-        return 'High Risk'
+# def get_risk_level(confidence):
+#     """Helper function to get risk level based on confidence"""
+#     if confidence == 'High':
+#         return 'Low Risk'
+#     elif confidence == 'Medium':
+#         return 'Medium Risk'
+#     else:
+#         return 'High Risk'
 
 # def startup_comparison(request):
 #     """Display detailed comparison of selected startups"""
@@ -2997,17 +3197,23 @@ class startup_comparison(APIView):
             comparison_set = ComparisonSet.objects.create(user=request.user)
             comparison_set.startups.set(startups)
 
-        # Build response
+        # Build response with all necessary fields
         startup_data = [{
             "id": s.id,
             "company_name": s.company_name,
             "industry": s.industry,
+            "tagline": getattr(s, 'tagline', None),
             "projected_return": s.projected_return,
             "reward_potential": s.reward_potential,
             "risk_score": s.risk_score,
             "risk_level": s.risk_level,
             "risk_color": s.risk_color,
-            "confidence": getattr(s, 'data_source_confidence', 'Medium')
+            "data_source_confidence": getattr(s, 'data_source_confidence', 'Medium'),
+            "revenue": s.revenue,
+            "net_income": getattr(s, 'net_income', None),
+            "is_deck_builder": getattr(s, 'is_deck_builder', False),
+            "source_deck_id": getattr(s, 'source_deck_id', None),
+            "source_deck": getattr(s, 'source_deck', None),
         } for s in startups]
 
         return Response({
@@ -3197,7 +3403,6 @@ class investment_simulation(APIView):
         startup_id = request.data.get('startup_id')
         investment_amount = request.data.get('investment_amount', 1000)
         duration_years = request.data.get('duration_years', 1)
-        growth_rate = 0.05  # Fixed
 
         try:
             investment_amount = float(investment_amount)
@@ -3211,6 +3416,23 @@ class investment_simulation(APIView):
         if startup_id:
             selected_startup = get_object_or_404(Startup, id=startup_id)
 
+        # Use CAPM to calculate growth rate if startup exists
+        if selected_startup:
+            projected_return = selected_startup.projected_return / 100 if selected_startup.projected_return else 0.12
+            risk_level = selected_startup.risk_level or 'Medium'
+            growth_rate = calculate_capm_growth_rate(projected_return, risk_level)
+        else:
+            growth_rate = 0.05  # Default fallback
+
+        # standard, universally accepted ROI formula ni
+        # **Formula:**
+        # ```
+        # ROI % = ((Final Value - Initial Investment) / Initial Investment) × 100
+        # ```
+
+        # Or simplified:
+        # ```
+        # ROI % = (Profit / Initial Investment) × 100
         final_value = investment_amount * (1 + growth_rate) ** duration_years
         total_gain = final_value - investment_amount
         roi_percentage = (total_gain / investment_amount) * 100
@@ -3222,48 +3444,91 @@ class investment_simulation(APIView):
             ending = current_value + growth
             yearly_breakdown.append({
                 "year": year,
-                "starting_value": current_value,
-                "growth_amount": growth,
-                "ending_value": ending
+                "starting_value": round(current_value, 2),
+                "growth_amount": round(growth, 2),
+                "ending_value": round(ending, 2)
             })
             current_value = ending
 
-        chart_data = [{"year": 0, "value": investment_amount}]
+        chart_data = [{"year": 0, "value": round(investment_amount, 2)}]
         temp_value = investment_amount
         for year in range(1, duration_years + 1):
             temp_value *= (1 + growth_rate)
-            chart_data.append({"year": year, "value": temp_value})
+            chart_data.append({"year": year, "value": round(temp_value, 2)})
 
-        if growth_rate <= 0.05:
-            risk_level = "Low Risk"
-            risk_color = "bg-green-100 text-green-800"
-        elif growth_rate <= 0.10:
-            risk_level = "Medium Risk"
-            risk_color = "bg-yellow-100 text-yellow-800"
+        # Determine risk level display based on CAPM growth rate
+        if selected_startup:
+            risk_level = selected_startup.risk_level or 'Medium'
         else:
-            risk_level = "High Risk"
-            risk_color = "bg-red-100 text-red-800"
+            # Fallback risk classification based on growth rate
+            if growth_rate <= 0.05:
+                risk_level = "Low"
+            elif growth_rate <= 0.10:
+                risk_level = "Medium"
+            else:
+                risk_level = "High"
+
+        risk_colors = {
+            'Low': 'bg-green-100 text-green-800',
+            'Medium': 'bg-yellow-100 text-yellow-800',
+            'High': 'bg-red-100 text-red-800'
+        }
+        risk_color = risk_colors.get(risk_level, 'bg-gray-100 text-gray-800')
 
         return Response({
             "simulation_run": True,
-            "investment_amount": investment_amount,
+            "investment_amount": round(investment_amount, 2),
             "duration_years": duration_years,
-            "growth_rate": growth_rate * 100,
-            "final_value": final_value,
-            "total_gain": total_gain,
-            "roi_percentage": roi_percentage,
+            "growth_rate": round(growth_rate * 100, 2),
+            "final_value": round(final_value, 2),
+            "total_gain": round(total_gain, 2),
+            "roi_percentage": round(roi_percentage, 2),
             "yearly_breakdown": yearly_breakdown,
             "chart_data": chart_data,
-            "risk_level": risk_level,
+            "risk_level": f"{risk_level} Risk",
             "risk_color": risk_color,
+            "calculation_method": "CAPM" if selected_startup else "Fixed Rate",
             "startup": {
                 "id": selected_startup.id,
                 "name": selected_startup.company_name,
-                "industry": selected_startup.industry
+                "industry": selected_startup.industry,
+                "projected_return": selected_startup.projected_return,
+                "risk_level": selected_startup.risk_level
             } if selected_startup else None
         })
 
 # Additional helper functions for advanced calculations
+def calculate_capm_growth_rate(projected_return, risk_level):
+    """
+    Calculate growth rate using CAPM formula:
+    Expected Return = Risk-Free Rate + Beta × (Projected Return - Risk-Free Rate)
+    
+    Args:
+        projected_return: Float (as decimal, e.g., 0.12 for 12%)
+        risk_level: String ('Low', 'Medium', or 'High')
+    
+    Returns:
+        Float: Calculated growth rate (as decimal)
+    """
+    RISK_FREE_RATE = 0.03  # 3% baseline (e.g., government bonds)
+    
+    # Beta values represent volatility relative to market
+    RISK_FACTORS = {
+        'Low': 0.8,      # Less volatile, conservative
+        'Medium': 1.0,   # Market volatility
+        'High': 1.4      # More volatile, aggressive
+    }
+    
+    beta = RISK_FACTORS.get(risk_level, 1.0)
+    
+    # CAPM Formula
+    risk_premium = projected_return - RISK_FREE_RATE
+    growth_rate = RISK_FREE_RATE + (beta * risk_premium)
+    
+    # Ensure minimum 1% growth
+    return max(growth_rate, 0.01)
+
+
 def calculate_monthly_contributions(principal, monthly_contribution, annual_rate, years):
     """Calculate future value with monthly contributions"""
     monthly_rate = annual_rate / 12
@@ -3280,16 +3545,15 @@ def calculate_monthly_contributions(principal, monthly_contribution, annual_rate
     
     return fv_principal + fv_contributions
 
+
 def calculate_inflation_adjusted_return(nominal_return, inflation_rate, years):
     """Calculate real return adjusted for inflation"""
     real_rate = ((1 + nominal_return) / (1 + inflation_rate)) - 1
     return real_rate
 
+
 def monte_carlo_simulation(principal, annual_return, volatility, years, simulations=1000):
     """Run Monte Carlo simulation for investment returns"""
-    import random
-    import math
-    
     results = []
     
     for _ in range(simulations):
@@ -3467,15 +3731,37 @@ class calculate_investment_api(APIView):
 
     def post(self, request):
         try:
+            startup_id = request.data.get('startup_id')
             investment_amount = float(request.data.get('investment_amount', 0))
             duration_years = int(request.data.get('duration_years', 1))
-            growth_rate = float(request.data.get('growth_rate', 5)) / 100
 
             if investment_amount <= 0 or duration_years <= 0:
                 raise ValueError("Investment amount and duration must be positive")
         except (ValueError, TypeError) as e:
             return Response({'success': False, 'error': str(e)}, status=400)
 
+        selected_startup = None
+        if startup_id:
+            selected_startup = get_object_or_404(Startup, id=startup_id)
+
+        # Use CAPM to calculate growth rate if startup exists
+        if selected_startup:
+            projected_return = selected_startup.projected_return / 100 if selected_startup.projected_return else 0.12
+            risk_level = selected_startup.risk_level or 'Medium'
+            growth_rate = calculate_capm_growth_rate(projected_return, risk_level)
+        else:
+            # Use user-provided growth rate or default
+            growth_rate = float(request.data.get('growth_rate', 5)) / 100
+
+        # standard, universally accepted ROI formula ni
+        # **Formula:**
+        # ```
+        # ROI % = ((Final Value - Initial Investment) / Initial Investment) × 100
+        # ```
+
+        # Or simplified:
+        # ```
+        # ROI % = (Profit / Initial Investment) × 100
         final_value = investment_amount * (1 + growth_rate) ** duration_years
         total_gain = final_value - investment_amount
         roi_percentage = (total_gain / investment_amount) * 100
@@ -3498,7 +3784,14 @@ class calculate_investment_api(APIView):
             'final_value': round(final_value, 2),
             'total_gain': round(total_gain, 2),
             'roi_percentage': round(roi_percentage, 2),
-            'yearly_breakdown': yearly_breakdown
+            'growth_rate': round(growth_rate * 100, 2),
+            'yearly_breakdown': yearly_breakdown,
+            'calculation_method': 'CAPM' if selected_startup else 'Custom Rate',
+            'startup_info': {
+                'id': selected_startup.id,
+                'name': selected_startup.company_name,
+                'risk_level': selected_startup.risk_level
+            } if selected_startup else None
         }, status=200)
 
 # def deck_home(request):

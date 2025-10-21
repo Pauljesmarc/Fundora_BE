@@ -142,6 +142,12 @@ class StartupSerializer(serializers.ModelSerializer):
         if obj.source_deck:
             return obj.source_deck.tagline
         return None
+    
+    def get_owner_email(self, obj):
+        """Get owner email, handle null owner"""
+        if obj.owner and obj.owner.user:
+            return obj.owner.user.email
+        return None
 
     def get_display_industry(self, obj):
         """Show tagline for pitch decks, industry for regular startups"""

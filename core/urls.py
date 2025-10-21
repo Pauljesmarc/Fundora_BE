@@ -152,7 +152,7 @@ urlpatterns = [
     path('investor/watchlist/remove/<int:startup_id>/', views.remove_from_watchlist.as_view(), name='remove_from_watchlist'),
     
     # Startups
-    path('startups/', StartupListView.as_view(), name='startup-list'),
+    path('investor/startups/', StartupListView.as_view(), name='startup-list'),
     path('startups/<int:pk>/', StartupDetailView.as_view(), name='startup-detail'),
     path('startups/<int:startup_id>/profile/', StartupProfileView.as_view(), name='startup-profile'),
     

@@ -27,6 +27,7 @@ from .serializers import (
     FinancialProjectionSerializer,
 )
 import uuid
+import random
 
 class StartupFinancialsView(APIView):
     def get(self, request, startup_id):
@@ -3416,27 +3417,34 @@ class investment_simulation(APIView):
         if startup_id:
             selected_startup = get_object_or_404(Startup, id=startup_id)
 
-        # Use CAPM to calculate growth rate if startup exists
+        # Canonical CAPM-based growth rate with bounds
         if selected_startup:
-            projected_return = selected_startup.projected_return / 100 if selected_startup.projected_return else 0.12
-            risk_level = selected_startup.risk_level or 'Medium'
-            growth_rate = calculate_capm_growth_rate(projected_return, risk_level)
+            risk_level = selected_startup.risk_level or "Medium"
+            projected_return = selected_startup.projected_return or 10  # percent form
+            projected_return = projected_return / 100
+
+            # Canonical CAPM parameters
+            RISK_FREE_RATE = 0.03
+            MARKET_RETURN = 0.10
+            BETA_VALUES = {"Low": 0.8, "Medium": 1.0, "High": 1.3}
+
+            beta = BETA_VALUES.get(risk_level, 1.0)
+            capm_rate = RISK_FREE_RATE + beta * (MARKET_RETURN - RISK_FREE_RATE)
+
+            # Blend CAPM with startup projected return (weighted realism)
+            growth_rate = (0.6 * capm_rate) + (0.4 * projected_return)
+
+            # Clamp realistic annual growth rate between 2% and 25%
+            growth_rate = max(min(growth_rate, 0.25), 0.02)
         else:
-            growth_rate = 0.05  # Default fallback
+            growth_rate = 0.07  # baseline for unspecified startup (7%)
 
-        # standard, universally accepted ROI formula ni
-        # **Formula:**
-        # ```
-        # ROI % = ((Final Value - Initial Investment) / Initial Investment) × 100
-        # ```
-
-        # Or simplified:
-        # ```
-        # ROI % = (Profit / Initial Investment) × 100
+        # Canonical CAGR compound formula
         final_value = investment_amount * (1 + growth_rate) ** duration_years
         total_gain = final_value - investment_amount
         roi_percentage = (total_gain / investment_amount) * 100
 
+        # Yearly breakdown (compound)
         yearly_breakdown = []
         current_value = investment_amount
         for year in range(1, duration_years + 1):
@@ -3450,30 +3458,20 @@ class investment_simulation(APIView):
             })
             current_value = ending
 
+        # Chart data for plotting
         chart_data = [{"year": 0, "value": round(investment_amount, 2)}]
         temp_value = investment_amount
         for year in range(1, duration_years + 1):
             temp_value *= (1 + growth_rate)
             chart_data.append({"year": year, "value": round(temp_value, 2)})
 
-        # Determine risk level display based on CAPM growth rate
-        if selected_startup:
-            risk_level = selected_startup.risk_level or 'Medium'
-        else:
-            # Fallback risk classification based on growth rate
-            if growth_rate <= 0.05:
-                risk_level = "Low"
-            elif growth_rate <= 0.10:
-                risk_level = "Medium"
-            else:
-                risk_level = "High"
-
         risk_colors = {
-            'Low': 'bg-green-100 text-green-800',
-            'Medium': 'bg-yellow-100 text-yellow-800',
-            'High': 'bg-red-100 text-red-800'
+            "Low": "bg-green-100 text-green-800",
+            "Medium": "bg-yellow-100 text-yellow-800",
+            "High": "bg-red-100 text-red-800",
         }
-        risk_color = risk_colors.get(risk_level, 'bg-gray-100 text-gray-800')
+
+        risk_color = risk_colors.get(risk_level if selected_startup else "Medium", "bg-gray-100 text-gray-800")
 
         return Response({
             "simulation_run": True,
@@ -3485,97 +3483,85 @@ class investment_simulation(APIView):
             "roi_percentage": round(roi_percentage, 2),
             "yearly_breakdown": yearly_breakdown,
             "chart_data": chart_data,
-            "risk_level": f"{risk_level} Risk",
+            "risk_level": f"{risk_level} Risk" if selected_startup else "Medium Risk",
             "risk_color": risk_color,
-            "calculation_method": "CAPM" if selected_startup else "Fixed Rate",
+            "calculation_method": "Canonical CAPM + CAGR",
             "startup": {
                 "id": selected_startup.id,
                 "name": selected_startup.company_name,
                 "industry": selected_startup.industry,
                 "projected_return": selected_startup.projected_return,
-                "risk_level": selected_startup.risk_level
-            } if selected_startup else None
+                "risk_level": selected_startup.risk_level,
+            } if selected_startup else None,
         })
 
 # Additional helper functions for advanced calculations
 def calculate_capm_growth_rate(projected_return, risk_level):
     """
-    Calculate growth rate using CAPM formula:
-    Expected Return = Risk-Free Rate + Beta × (Projected Return - Risk-Free Rate)
-    
-    Args:
-        projected_return: Float (as decimal, e.g., 0.12 for 12%)
-        risk_level: String ('Low', 'Medium', or 'High')
-    
-    Returns:
-        Float: Calculated growth rate (as decimal)
+    Canonical CAPM-based annual growth rate.
+    Expected Return = Rf + β × (E[Rm] - Rf)
+    Then blended with the startup's projected return.
     """
-    RISK_FREE_RATE = 0.03  # 3% baseline (e.g., government bonds)
-    
-    # Beta values represent volatility relative to market
-    RISK_FACTORS = {
-        'Low': 0.8,      # Less volatile, conservative
-        'Medium': 1.0,   # Market volatility
-        'High': 1.4      # More volatile, aggressive
-    }
-    
-    beta = RISK_FACTORS.get(risk_level, 1.0)
-    
-    # CAPM Formula
-    risk_premium = projected_return - RISK_FREE_RATE
-    growth_rate = RISK_FREE_RATE + (beta * risk_premium)
-    
-    # Ensure minimum 1% growth
-    return max(growth_rate, 0.01)
+    RISK_FREE_RATE = 0.03   # government bonds baseline
+    MARKET_RETURN = 0.10    # market average 10%
+    BETA_VALUES = {"Low": 0.8, "Medium": 1.0, "High": 1.3}
+
+    beta = BETA_VALUES.get(risk_level, 1.0)
+    capm_expected = RISK_FREE_RATE + beta * (MARKET_RETURN - RISK_FREE_RATE)
+
+    # blend CAPM with the startup's own return expectation
+    projected_return = max(min(projected_return, 0.25), 0.02)
+    growth_rate = (0.6 * capm_expected) + (0.4 * projected_return)
+
+    return max(min(growth_rate, 0.25), 0.02)
 
 
 def calculate_monthly_contributions(principal, monthly_contribution, annual_rate, years):
-    """Calculate future value with monthly contributions"""
+    """Canonical future value with monthly compounding and contributions."""
     monthly_rate = annual_rate / 12
     months = years * 12
-    
-    # Future value of principal
-    fv_principal = principal * (1 + annual_rate) ** years
-    
-    # Future value of monthly contributions (ordinary annuity)
+
+    fv_principal = principal * (1 + monthly_rate) ** months
+
     if monthly_rate > 0:
         fv_contributions = monthly_contribution * (((1 + monthly_rate) ** months - 1) / monthly_rate)
     else:
         fv_contributions = monthly_contribution * months
-    
+
     return fv_principal + fv_contributions
 
 
 def calculate_inflation_adjusted_return(nominal_return, inflation_rate, years):
-    """Calculate real return adjusted for inflation"""
+    """Canonical Fisher equation for real return."""
     real_rate = ((1 + nominal_return) / (1 + inflation_rate)) - 1
-    return real_rate
+    return round(real_rate, 4)
 
 
 def monte_carlo_simulation(principal, annual_return, volatility, years, simulations=1000):
-    """Run Monte Carlo simulation for investment returns"""
+    """Canonical Monte Carlo simulation for investment returns."""
+    volatility = max(min(volatility, 0.3), 0.05)  # limit to 5–30% volatility
+
     results = []
-    
     for _ in range(simulations):
         value = principal
-        for year in range(years):
-            # Generate random return based on normal distribution
-            random_return = random.normalvariate(annual_return, volatility)
-            value *= (1 + random_return)
+        for _ in range(years):
+            yearly_return = random.normalvariate(annual_return, volatility)
+            yearly_return = max(min(yearly_return, 0.5), -0.5)  # bound annual shocks ±50%
+            value *= (1 + yearly_return)
         results.append(value)
-    
-    # Calculate statistics
+
     results.sort()
-    
+    n = len(results)
+
     return {
-        'mean': sum(results) / len(results),
-        'median': results[len(results) // 2],
-        'percentile_10': results[int(len(results) * 0.1)],
-        'percentile_25': results[int(len(results) * 0.25)],
-        'percentile_75': results[int(len(results) * 0.75)],
-        'percentile_90': results[int(len(results) * 0.9)],
-        'min': min(results),
-        'max': max(results)
+        "mean": sum(results) / n,
+        "median": results[n // 2],
+        "percentile_10": results[int(n * 0.1)],
+        "percentile_25": results[int(n * 0.25)],
+        "percentile_75": results[int(n * 0.75)],
+        "percentile_90": results[int(n * 0.9)],
+        "min": results[0],
+        "max": results[-1],
     }
 
 @login_required

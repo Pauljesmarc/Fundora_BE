@@ -3869,8 +3869,11 @@ class delete_deck(APIView):
         try:
             owner = request.user.profile
             deck = get_object_or_404(Deck, id=deck_id, owner=owner)
+            # 🔥 Delete any startup linked to this deck
+            Startup.objects.filter(source_deck=deck).delete()
+            # 🧹 Then delete the deck itself
             deck.delete()
-            return Response({'success': True, 'message': 'Deck deleted successfully.'}, status=200)
+            return Response({'success': True, 'message': 'Deck and linked startup deleted successfully.'}, status=200)
         except Exception as e:
             import traceback
             traceback.print_exc()

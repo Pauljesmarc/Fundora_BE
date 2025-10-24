@@ -4226,98 +4226,92 @@ class edit_startup(APIView):
 #         })
 
 class view_startup_report(APIView):
+    """
+    DRF-compliant view to get detailed startup report for authenticated users
+    """
     authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated]
 
     def get(self, request, startup_id):
-        owner = request.user.profile
-        startup = get_object_or_404(Startup, id=startup_id, owner=owner)
+        try:
+            # Get the RegisteredUser profile from the authenticated user
+            profile = RegisteredUser.objects.select_related('user').get(user=request.user)
+        except RegisteredUser.DoesNotExist:
+            return Response({
+                'success': False,
+                'error': 'User profile not found.',
+                'detail': 'No RegisteredUser profile associated with this user.'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        # Check if user is a startup
+        if profile.label != 'startup':
+            return Response({
+                'success': False,
+                'error': 'Access denied.',
+                'detail': 'Only startup users can access startup reports.'
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        # Get the startup - ensure it's owned by this user
+        try:
+            startup = Startup.objects.select_related('owner', 'source_deck').get(id=startup_id, owner=profile)
+        except Startup.DoesNotExist:
+            return Response({
+                'success': False,
+                'error': 'Startup not found.',
+                'detail': 'Startup not found or you do not have permission to access it.'
+            }, status=status.HTTP_404_NOT_FOUND)
 
         # ✅ Track view
-        StartupView.objects.create(
-            user=request.user,
-            startup=startup,
-            viewed_at = timezone.now(),
-            ip_address=request.META.get('REMOTE_ADDR')
-        )
+        try:
+            StartupView.objects.create(
+                user=request.user,
+                startup=startup,
+                viewed_at=timezone.now(),
+                ip_address=request.META.get('REMOTE_ADDR')
+            )
+        except Exception as e:
+            # Log error but don't fail the request
+            print(f"Error tracking startup view: {e}")
 
-        if startup.source_deck:
-            deck = startup.source_deck
-
-            # ✅ Serialize deck sections manually
-            problem_data = {
-                'description': deck.problem.description
-            } if hasattr(deck, 'problem') else None
-
-            solution_data = {
-                'description': deck.solution.description
-            } if hasattr(deck, 'solution') else None
-
-            market_data = {
-                'primary_market': deck.market_analysis.primary_market,
-                'target_audience': deck.market_analysis.target_audience,
-                'market_growth_rate': float(deck.market_analysis.market_growth_rate),
-                'competitive_advantage': deck.market_analysis.competitive_advantage
-            } if hasattr(deck, 'market_analysis') else None
-
-            ask_data = {
-                'amount': float(deck.ask.amount),
-                'usage_description': deck.ask.usage_description
-            } if hasattr(deck, 'ask') else None
-
-            deck_data = {
-                'deck_info': {
-                    'id': deck.id,
-                    'company_name': getattr(deck, 'company_name', ''),
-                    'tagline': getattr(deck, 'tagline', ''),
-                    'created_at': deck.created_at
-                },
-                'problem': problem_data,
-                'solution': solution_data,
-                'market_analysis': market_data,
-                'ask': ask_data,
-                'team_members': [
-                    {'name': member.name, 'role': member.title}
-                    for member in deck.team_members.all()
-                ],
-                'financials': [
-                    {'year': f.year, 'revenue': float(f.revenue), 'profit': float(f.profit)}
-                    for f in deck.financials.order_by('year')
-                ],
-                'startup': {
-                    'id': startup.id,
-                    'company_name': startup.company_name,
-                    'industry': startup.industry
-                },
-                'report_type': 'deck'
-            }
-            return Response(deck_data, status=200)
-
-        else:
-            company_data = {
+        # Return startup report data
+        company_data = {
+            'success': True,
+            'startup': {
                 'id': startup.id,
                 'company_name': startup.company_name,
                 'industry': startup.industry,
                 'company_description': startup.company_description,
                 'data_source_confidence': startup.data_source_confidence,
-                'reporting_period': startup.reporting_period,
-                'previous_revenue': float(startup.previous_revenue) if startup.previous_revenue else None,
-                'current_revenue': float(startup.current_revenue) if startup.current_revenue else None,
-                'revenue': float(startup.revenue) if startup.revenue else None,
-                'net_income': float(startup.net_income) if startup.net_income else None,
-                'total_assets': float(startup.total_assets) if startup.total_assets else None,
-                'total_liabilities': float(startup.total_liabilities) if startup.total_liabilities else None,
-                'shareholder_equity': float(startup.shareholder_equity) if startup.shareholder_equity else None,
-                'cash_flow': float(startup.cash_flow) if startup.cash_flow else None,
-                'investment_flow': float(startup.investment_flow) if startup.investment_flow else None,
-                'financing_flow': float(startup.financing_flow) if startup.financing_flow else None,
-                'team_strength': startup.team_strength,
-                'market_position': startup.market_position,
-                'brand_reputation': startup.brand_reputation,
                 'confidence_percentage': startup.confidence_percentage,
-                'report_type': 'standard'
+                'reporting_period': startup.reporting_period,
+                'created_at': startup.created_at.isoformat() if startup.created_at else None,
+                'updated_at': startup.updated_at.isoformat() if startup.updated_at else None
+            },
+            'financials': {
+                'income_statement': {
+                    'previous_revenue': float(startup.previous_revenue) if startup.previous_revenue else None,
+                    'current_revenue': float(startup.current_revenue) if startup.current_revenue else None,
+                    'revenue': float(startup.revenue) if startup.revenue else None,
+                    'net_income': float(startup.net_income) if startup.net_income else None
+                },
+                'balance_sheet': {
+                    'total_assets': float(startup.total_assets) if startup.total_assets else None,
+                    'total_liabilities': float(startup.total_liabilities) if startup.total_liabilities else None,
+                    'shareholder_equity': float(startup.shareholder_equity) if startup.shareholder_equity else None
+                },
+                'cash_flow': {
+                    'operations': float(startup.cash_flow) if startup.cash_flow else None,
+                    'investment_flow': float(startup.investment_flow) if startup.investment_flow else None,
+                    'financing_flow': float(startup.financing_flow) if startup.financing_flow else None
+                }
+            },
+            'qualitative': {
+                'team_strength': startup.team_strength or '',
+                'market_position': startup.market_position or '',
+                'brand_reputation': startup.brand_reputation or ''
             }
-            return Response(company_data, status=200)
+        }
+        return Response(company_data, status=status.HTTP_200_OK)
 
 # def startup_login(request):
 #     """Login specifically for startup users using Module_3 template"""

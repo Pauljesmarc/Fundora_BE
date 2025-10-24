@@ -4061,45 +4061,58 @@ class delete_startup(APIView):
 #     })
 
 class edit_startup(APIView):
+    authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated]
 
     def get(self, request, startup_id):
-        startup_user_id = request.session.get('startup_user_id')
-        user_label = request.session.get('user_label')
+        # Use JWT authentication - get owner from request.user.profile
+        owner = request.user.profile
+        startup = get_object_or_404(Startup, id=startup_id, owner=owner)
 
-        if not startup_user_id or user_label != 'startup':
-            return Response({'error': 'Not authenticated'}, status=403)
+        # Check if startup is from pitch deck (should not be editable)
+        if startup.source_deck:
+            return Response({
+                'error': 'Pitch deck startups cannot be edited through this form.',
+                'startup_type': 'pitch-deck'
+            }, status=400)
 
-        user = get_object_or_404(RegisteredUser, id=startup_user_id)
-        startup = get_object_or_404(Startup, id=startup_id, owner=user)
-
+        # Return all fields that the frontend expects
         form_data = {
+            'id': startup.id,
             'company_name': startup.company_name,
             'industry': startup.industry,
             'company_description': startup.company_description,
             'data_source_confidence': startup.data_source_confidence,
-            'previous_revenue': startup.revenue or '',
-            'current_revenue': startup.revenue or '',
-            'net_income': startup.net_income or '',
-            'total_assets': startup.total_assets or '',
-            'total_liabilities': startup.total_liabilities or '',
-            'cash_flow': startup.cash_flow or '',
-            'team_strength': startup.team_strength,
-            'market_position': startup.market_position,
-            'brand_reputation': startup.brand_reputation,
+            'reporting_period': startup.reporting_period or '',
+            'previous_revenue': float(startup.previous_revenue) if startup.previous_revenue else None,
+            'current_revenue': float(startup.current_revenue) if startup.current_revenue else None,
+            'revenue': float(startup.revenue) if startup.revenue else None,
+            'net_income': float(startup.net_income) if startup.net_income else None,
+            'total_assets': float(startup.total_assets) if startup.total_assets else None,
+            'total_liabilities': float(startup.total_liabilities) if startup.total_liabilities else None,
+            'shareholder_equity': float(startup.shareholder_equity) if startup.shareholder_equity else None,
+            'cash_flow': float(startup.cash_flow) if startup.cash_flow else None,
+            'investment_flow': float(startup.investment_flow) if startup.investment_flow else None,
+            'financing_flow': float(startup.financing_flow) if startup.financing_flow else None,
+            'team_strength': startup.team_strength or '',
+            'market_position': startup.market_position or '',
+            'brand_reputation': startup.brand_reputation or '',
+            'confidence_percentage': startup.confidence_percentage,
         }
 
-        return Response({'startup': form_data}, status=200)
+        return Response(form_data, status=200)
 
     def put(self, request, startup_id):
-        startup_user_id = request.session.get('startup_user_id')
-        user_label = request.session.get('user_label')
+        # Use JWT authentication - get owner from request.user.profile
+        owner = request.user.profile
+        startup = get_object_or_404(Startup, id=startup_id, owner=owner)
 
-        if not startup_user_id or user_label != 'startup':
-            return Response({'error': 'Not authenticated'}, status=403)
-
-        user = get_object_or_404(RegisteredUser, id=startup_user_id)
-        startup = get_object_or_404(Startup, id=startup_id, owner=user)
+        # Check if startup is from pitch deck (should not be editable)
+        if startup.source_deck:
+            return Response({
+                'error': 'Pitch deck startups cannot be edited through this form.',
+                'startup_type': 'pitch-deck'
+            }, status=400)
 
         data = request.data
 
@@ -4112,26 +4125,47 @@ class edit_startup(APIView):
         confidence_level = data.get('data_source_confidence', 'Medium')
         confidence_percentage = {'High': 75, 'Medium': 50, 'Low': 30}.get(confidence_level, 50)
 
+        # Update all fields
         startup.company_name = data.get('company_name', '')
         startup.industry = data.get('industry', '')
         startup.company_description = data.get('company_description', '')
         startup.data_source_confidence = confidence_level
         startup.confidence_percentage = confidence_percentage
-        startup.revenue = to_decimal(data.get('current_revenue'))
+        
+        # Financial data - Income Statement
+        startup.reporting_period = data.get('reporting_period', '')
+        startup.previous_revenue = to_decimal(data.get('previous_revenue'))
+        startup.current_revenue = to_decimal(data.get('current_revenue'))
+        startup.revenue = to_decimal(data.get('current_revenue'))  # Keep revenue in sync with current_revenue
         startup.net_income = to_decimal(data.get('net_income'))
+        
+        # Financial data - Balance Sheet
         startup.total_assets = to_decimal(data.get('total_assets'))
         startup.total_liabilities = to_decimal(data.get('total_liabilities'))
+        # Shareholder equity is calculated on frontend, but we can store it
+        startup.shareholder_equity = to_decimal(data.get('shareholder_equity'))
+        
+        # Financial data - Cash Flow
         startup.cash_flow = to_decimal(data.get('cash_flow'))
+        startup.investment_flow = to_decimal(data.get('investment_flow'))
+        startup.financing_flow = to_decimal(data.get('financing_flow'))
+        
+        # Qualitative data
         startup.team_strength = data.get('team_strength', '')
         startup.market_position = data.get('market_position', '')
         startup.brand_reputation = data.get('brand_reputation', '')
 
         startup.save()
 
-        request.session.pop('company_data', None)
-        request.session.pop('edit_startup_id', None)
-
-        return Response({'success': True, 'message': f'Startup "{startup.company_name}" updated successfully!'}, status=200)
+        return Response({
+            'success': True, 
+            'message': f'Startup "{startup.company_name}" updated successfully!',
+            'startup': {
+                'id': startup.id,
+                'company_name': startup.company_name,
+                'industry': startup.industry
+            }
+        }, status=200)
 
 # def view_startup_report(request, startup_id):
 #     """View the health report for a specific startup"""
@@ -4261,28 +4295,29 @@ class view_startup_report(APIView):
 
         else:
             company_data = {
+                'id': startup.id,
                 'company_name': startup.company_name,
                 'industry': startup.industry,
                 'company_description': startup.company_description,
                 'data_source_confidence': startup.data_source_confidence,
+                'reporting_period': startup.reporting_period,
+                'previous_revenue': float(startup.previous_revenue) if startup.previous_revenue else None,
+                'current_revenue': float(startup.current_revenue) if startup.current_revenue else None,
                 'revenue': float(startup.revenue) if startup.revenue else None,
                 'net_income': float(startup.net_income) if startup.net_income else None,
                 'total_assets': float(startup.total_assets) if startup.total_assets else None,
                 'total_liabilities': float(startup.total_liabilities) if startup.total_liabilities else None,
+                'shareholder_equity': float(startup.shareholder_equity) if startup.shareholder_equity else None,
                 'cash_flow': float(startup.cash_flow) if startup.cash_flow else None,
+                'investment_flow': float(startup.investment_flow) if startup.investment_flow else None,
+                'financing_flow': float(startup.financing_flow) if startup.financing_flow else None,
                 'team_strength': startup.team_strength,
                 'market_position': startup.market_position,
                 'brand_reputation': startup.brand_reputation,
+                'confidence_percentage': startup.confidence_percentage,
                 'report_type': 'standard'
             }
-            return Response({
-                'startup': {
-                    'id': startup.id,
-                    'company_name': startup.company_name,
-                    'industry': startup.industry
-                },
-                'company_data': company_data
-            }, status=200)
+            return Response(company_data, status=200)
 
 # def startup_login(request):
 #     """Login specifically for startup users using Module_3 template"""
@@ -5213,8 +5248,8 @@ class startup_detail(APIView):
 
     def get(self, request, startup_id):
         try:
-            # Get the RegisteredUser profile from the authenticated user
-            profile = RegisteredUser.objects.get(user=request.user)
+            # Get the RegisteredUser profile from the authenticated user - optimized with select_related
+            profile = RegisteredUser.objects.select_related('user').get(user=request.user)
         except RegisteredUser.DoesNotExist:
             return Response({
                 'error': 'User profile not found.',
@@ -5229,8 +5264,8 @@ class startup_detail(APIView):
             }, status=status.HTTP_403_FORBIDDEN)
 
         try:
-            # Get the startup owned by this user
-            startup = Startup.objects.get(id=startup_id, owner=profile)
+            # Get the startup owned by this user - optimized with select_related
+            startup = Startup.objects.select_related('owner', 'source_deck').get(id=startup_id, owner=profile)
         except Startup.DoesNotExist:
             return Response({
                 'error': 'Startup not found.',
@@ -5247,8 +5282,8 @@ class startup_detail(APIView):
 
     def put(self, request, startup_id):
         try:
-            # Get the RegisteredUser profile from the authenticated user
-            profile = RegisteredUser.objects.get(user=request.user)
+            # Get the RegisteredUser profile from the authenticated user - optimized
+            profile = RegisteredUser.objects.select_related('user').get(user=request.user)
         except RegisteredUser.DoesNotExist:
             return Response({
                 'error': 'User profile not found.',
@@ -5263,8 +5298,8 @@ class startup_detail(APIView):
             }, status=status.HTTP_403_FORBIDDEN)
 
         try:
-            # Get the startup owned by this user
-            startup = Startup.objects.get(id=startup_id, owner=profile)
+            # Get the startup owned by this user - optimized
+            startup = Startup.objects.select_related('owner', 'source_deck').get(id=startup_id, owner=profile)
         except Startup.DoesNotExist:
             return Response({
                 'error': 'Startup not found.',

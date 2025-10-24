@@ -3554,7 +3554,7 @@ class added_startups(APIView):
 
         # Prepare enriched data with analytics
         enriched_data = []
-        for startup in startups:
+        for index, startup in enumerate(startups, 1):  # Start user-relative ID from 1
             try:
                 # Get analytics data
                 analytics = get_startup_analytics(startup)
@@ -3565,6 +3565,9 @@ class added_startups(APIView):
                 # Add analytics
                 serialized['analytics'] = analytics
                 
+                # Add user-relative startup ID (1, 2, 3, etc.)
+                serialized['user_startup_id'] = index
+                
                 enriched_data.append(serialized)
                 
             except Exception as e:
@@ -3573,6 +3576,7 @@ class added_startups(APIView):
                 # Still include the startup without analytics
                 serialized = StartupSerializer(startup).data
                 serialized['analytics'] = None
+                serialized['user_startup_id'] = index
                 enriched_data.append(serialized)
 
         return Response({

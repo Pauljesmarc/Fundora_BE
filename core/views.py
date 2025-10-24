@@ -5225,6 +5225,11 @@ class create_cover(APIView):
             serializer = DeckSerializer(deck, data=deck_data, partial=True)
             serializer.is_valid(raise_exception=True)
             serializer.save()
+            # 🔄 Sync Startup if one is linked to this deck
+            Startup.objects.filter(source_deck=deck).update(
+                company_name=deck.company_name,
+                company_description=deck.tagline
+            )
 
             return Response({
                 'success': True,
@@ -5476,6 +5481,9 @@ class create_team(APIView):
                 serializer.is_valid(raise_exception=True)
                 created.append(serializer.save())
 
+            # 🔄 Sync Startup if linked to this deck
+            team_text = "\n".join([f"{m.name} - {m.title}" for m in deck.team_members.all()])
+
             return Response({
                 'success': True,
                 'message': 'Team members saved successfully.',
@@ -5591,6 +5599,11 @@ class create_ask(APIView):
             )
             serializer.is_valid(raise_exception=True)
             serializer.save()
+
+            # 🔄 Sync funding ask if Startup already exists
+            Startup.objects.filter(source_deck=deck).update(
+                funding_ask=serializer.instance.amount
+            )
 
             # ✅ Create Startup shell if not already linked
             if not Startup.objects.filter(source_deck=deck).exists():

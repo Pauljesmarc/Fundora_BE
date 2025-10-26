@@ -9,6 +9,7 @@ from .views import (
 )
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from .views import TestAPI
 
 import inspect
 print("SaveComparisonView type:", type(getattr(views, 'SaveComparisonView', None)))
@@ -172,4 +173,6 @@ urlpatterns = [
     path('investor/comparisons/save/', views.SaveComparisonView.as_view(), name='save_comparison'),
     path('investor/comparisons/', views.ListComparisonsView.as_view(), name='list_comparisons'),
     path('investor/comparisons/delete/<int:comparison_id>/', views.DeleteComparisonSetView.as_view(), name='delete_comparison_set'),
+
+    path('test/', TestAPI.as_view(), name='test-api'),
 ]

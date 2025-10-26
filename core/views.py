@@ -5040,6 +5040,7 @@ class create_deck(APIView):
 #         return JsonResponse({'success': False, 'error': f'An error occurred: {str(e)}'}, status=500)
 
 class add_deck_to_recommended(APIView):
+    authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated]
 
     def post(self, request):

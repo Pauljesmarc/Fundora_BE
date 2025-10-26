@@ -70,6 +70,7 @@ urlpatterns = [
     path('logout/', views.user_logout.as_view(), name='user_logout'),
     path('startups/', views.added_startups.as_view(), name='added_startups'),
     path('startup/<int:startup_id>/', views.startup_detail.as_view(), name='startup_detail'),
+    path('startup/<int:startup_id>/update/', views.startup_detail.as_view(), name='startup_update'),  # Alias for PUT requests
 
 
     # Company Information Form and Health Report
@@ -85,7 +86,7 @@ urlpatterns = [
     path('startup/health-report/', views.health_report_page.as_view(), name='health_report_page'),
     path('startup/add/', views.add_startup, name='add_startup'),
     path('startup/<int:startup_id>/delete/', views.delete_startup, name='delete_startup'),
-    path('startup/<int:startup_id>/edit/', views.edit_startup.as_view(), name='edit_startup'),
+    path('startup/<int:startup_id>/edit/', views.startup_detail.as_view(), name='edit_startup'),  # Now using startup_detail for edit
     path('startup/<int:startup_id>/report/', views.view_startup_report.as_view(), name='view_startup_report'),
     
     # MOD1 AND MOD2

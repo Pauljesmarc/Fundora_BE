@@ -4020,11 +4020,11 @@ class added_startups(APIView):
                     serialized['user_startup_id'] = index
                     enriched_data.append(serialized)
 
-                return Response({
-                    'success': True,
-                    'count': len(enriched_data),
-                    'results': enriched_data
-                }, status=status.HTTP_200_OK)
+            return Response({
+                'success': True,
+                'count': len(enriched_data),
+                'results': enriched_data
+            }, status=status.HTTP_200_OK)
 
         except Exception as e:
             import traceback

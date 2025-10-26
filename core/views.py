@@ -3978,53 +3978,53 @@ class added_startups(APIView):
                 'error': 'User profile not found.',
                 'detail': 'No RegisteredUser profile associated with this user.'
             }, status=status.HTTP_404_NOT_FOUND)
+        try:
+            # Base queryset
+            if profile.label == 'startup':
+                startups = Startup.objects.filter(owner=profile).order_by('-created_at')
+            elif profile.label == 'investor':
+                startups = Startup.objects.all().order_by('-created_at')
+            else:
+                return Response({
+                    'error': 'Access denied.',
+                    'detail': 'Only startup or investor users can access startups.'
+                }, status=status.HTTP_403_FORBIDDEN)
 
-        # Base queryset
-        if profile.label == 'startup':
+            # Get all startups owned by this user
             startups = Startup.objects.filter(owner=profile).order_by('-created_at')
-        elif profile.label == 'investor':
-            startups = Startup.objects.all().order_by('-created_at')
-        else:
-            return Response({
-                'error': 'Access denied.',
-                'detail': 'Only startup or investor users can access startups.'
-            }, status=status.HTTP_403_FORBIDDEN)
 
-        # Get all startups owned by this user
-        startups = Startup.objects.filter(owner=profile).order_by('-created_at')
+            # Prepare enriched data with analytics
+            enriched_data = []
+            for index, startup in enumerate(startups, 1):  # Start user-relative ID from 1
+                try:
+                    # Get analytics data
+                    analytics = get_startup_analytics(startup)
+                    
+                    # Serialize startup data
+                    serialized = StartupSerializer(startup).data
+                    
+                    # Add analytics
+                    serialized['analytics'] = analytics
+                    
+                    # Add user-relative startup ID (1, 2, 3, etc.)
+                    serialized['user_startup_id'] = index
+                    
+                    enriched_data.append(serialized)
+                    
+                except Exception as e:
+                    # Log error but continue with other startups
+                    print(f"Error processing startup {startup.id}: {e}")
+                    # Still include the startup without analytics
+                    serialized = StartupSerializer(startup).data
+                    serialized['analytics'] = None
+                    serialized['user_startup_id'] = index
+                    enriched_data.append(serialized)
 
-        # Prepare enriched data with analytics
-        enriched_data = []
-        for index, startup in enumerate(startups, 1):  # Start user-relative ID from 1
-            try:
-                # Get analytics data
-                analytics = get_startup_analytics(startup)
-                
-                # Serialize startup data
-                serialized = StartupSerializer(startup).data
-                
-                # Add analytics
-                serialized['analytics'] = analytics
-                
-                # Add user-relative startup ID (1, 2, 3, etc.)
-                serialized['user_startup_id'] = index
-                
-                enriched_data.append(serialized)
-                
-            except Exception as e:
-                # Log error but continue with other startups
-                print(f"Error processing startup {startup.id}: {e}")
-                # Still include the startup without analytics
-                serialized = StartupSerializer(startup).data
-                serialized['analytics'] = None
-                serialized['user_startup_id'] = index
-                enriched_data.append(serialized)
-
-            return Response({
-                'success': True,
-                'count': len(enriched_data),
-                'results': enriched_data
-            }, status=status.HTTP_200_OK)
+                return Response({
+                    'success': True,
+                    'count': len(enriched_data),
+                    'results': enriched_data
+                }, status=status.HTTP_200_OK)
 
         except Exception as e:
             import traceback

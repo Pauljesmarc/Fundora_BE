@@ -1163,15 +1163,16 @@ class StartupListView(ListAPIView):
         data = serializer.data
         
         # Apply financial risk filter (post-serialization)
+        # IMPORTANT: Only filter financial startups, exclude pitch decks (risk_level = None)
         if hasattr(self, '_risk_filter') and self._risk_filter is not None:
             risk_value = self._risk_filter
             if risk_value <= 33:
-                # Conservative: Low risk only
+                # Conservative: Low risk only (exclude pitch decks with None)
                 data = [item for item in data if item.get('risk_level') == 'Low']
             elif risk_value <= 66:
-                # Balanced: Low and Medium risk
+                # Balanced: Low and Medium risk (exclude pitch decks with None)
                 data = [item for item in data if item.get('risk_level') in ['Low', 'Medium']]
-            # else: Aggressive: show all risk levels
+            # else: Aggressive: show all risk levels (including pitch decks)
         
         # Apply min_return filter (post-serialization)
         if hasattr(self, '_min_return_filter') and self._min_return_filter is not None:
@@ -1191,8 +1192,9 @@ class StartupListView(ListAPIView):
             data = sorted(data, key=lambda x: x.get('reward_potential') or 0, reverse=True)
         elif sort_by == 'risk_asc':
             # Sort by financial risk (Low < Medium < High)
-            risk_order = {'Low': 1, 'Medium': 2, 'High': 3}
-            data = sorted(data, key=lambda x: risk_order.get(x.get('risk_level'), 2))
+            # Pitch decks (None) go to the end
+            risk_order = {'Low': 1, 'Medium': 2, 'High': 3, None: 4}
+            data = sorted(data, key=lambda x: risk_order.get(x.get('risk_level'), 4))
         
         return Response(data)
     

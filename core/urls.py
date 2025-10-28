@@ -148,9 +148,9 @@ urlpatterns = [
 
 
     # Dashboard & Watchlist 
-    path('investor/dashboard/', views.dashboard.as_view(), name='dashboard'),
-    path('investor/watchlist/', views.watchlist_view.as_view(), name='watchlist'),
-    path('investor/watchlist/add/<int:startup_id>/', views.add_to_watchlist.as_view(), name='add_to_watchlist'),
+    path('api/investor/dashboard/', views.dashboard.as_view(), name='dashboard'),
+    path('api/investor/watchlist/', views.watchlist_view.as_view(), name='watchlist'),
+    path('api/investor/watchlist/add/<int:startup_id>/', views.add_to_watchlist.as_view(), name='add_to_watchlist'),
     path('investor/watchlist/remove/<int:startup_id>/', views.remove_from_watchlist.as_view(), name='remove_from_watchlist'),
     
     # Startups

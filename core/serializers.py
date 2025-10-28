@@ -95,10 +95,12 @@ class StartupSerializer(serializers.ModelSerializer):
 
     reward_potential = serializers.SerializerMethodField()
     projected_return = serializers.SerializerMethodField()
-    risk_level = serializers.SerializerMethodField()  # NEW: Financial risk calculation
+    risk_level = serializers.SerializerMethodField()
     display_industry = serializers.SerializerMethodField()
     is_in_watchlist = serializers.SerializerMethodField()
     tagline = serializers.SerializerMethodField()
+    market_growth_rate = serializers.SerializerMethodField()
+
 
     class Meta:
         model = Startup
@@ -130,11 +132,12 @@ class StartupSerializer(serializers.ModelSerializer):
             'confidence_percentage',
             'reward_potential',
             'projected_return',
-            'risk_level',  # NEW: Add to fields list
+            'risk_level',
             'owner_email',
             'created_at',
             'updated_at',
             'is_in_watchlist',
+            'market_growth_rate',
         ]
 
     def get_tagline(self, obj):
@@ -156,6 +159,23 @@ class StartupSerializer(serializers.ModelSerializer):
         if obj.industry and obj.industry != "—":
             return obj.industry
         return "—"
+    
+    
+    def get_market_growth_rate(self, obj):
+        """Get market growth rate from source deck if available"""
+        if not obj.source_deck:
+            return None
+        
+        try:
+            # Access the OneToOne relationship - will raise DoesNotExist if not present
+            market_analysis = obj.source_deck.market_analysis
+            if market_analysis and market_analysis.market_growth_rate is not None:
+                return float(market_analysis.market_growth_rate)
+        except Exception:
+            # Handle all exceptions (DoesNotExist, AttributeError, etc.)
+            return None
+        
+        return None
 
     def get_reward_potential(self, obj):
         """
@@ -227,15 +247,24 @@ class StartupSerializer(serializers.ModelSerializer):
     
     def get_risk_level(self, obj):
         """
-        Calculate financial risk level based on multiple financial metrics:
+        Calculate financial risk level based on multiple financial metrics.
+        
+        For pitch decks (startups with source_deck), returns None since complicated
+        and financial for financial risk.
+        
+        For financial startups, calculates risk based on:
         - Debt-to-Equity Ratio
         - Debt-to-Assets Ratio
         - Current Ratio (liquidity)
         - Profit Margin
         - Net Income status
         
-        Returns: 'Low', 'Medium', or 'High'
+        Returns: 'Low', 'Medium', 'High', or None (for pitch decks)
         """
+        # Pitch decks don't have financial risk - return None
+        if obj.source_deck or obj.is_deck_builder:
+            return None
+        
         try:
             # Extract financial data
             equity = float(obj.shareholder_equity or 0)
@@ -244,8 +273,11 @@ class StartupSerializer(serializers.ModelSerializer):
             revenue = float(obj.revenue or 0)
             net_income = float(obj.net_income or 0)
             
+            # If no financial data at all, return None
+            if all(v == 0 for v in [equity, liabilities, assets, revenue, net_income]):
+                return None
+            
             # Estimate current assets/liabilities if not available
-            # (In production, you'd want actual current assets/liabilities fields)
             current_assets = float(getattr(obj, 'current_assets', assets * 0.6) or 0)
             current_liabilities = float(getattr(obj, 'current_liabilities', liabilities * 0.5) or 0)
             
@@ -253,7 +285,6 @@ class StartupSerializer(serializers.ModelSerializer):
             risk_factors = 0
             
             # 1. Debt-to-Equity Ratio (financial leverage)
-            # Low risk: < 1.0, Medium: 1.0-2.0, High: > 2.0
             if equity > 0:
                 debt_to_equity = liabilities / equity
                 if debt_to_equity < 1.0:
@@ -265,7 +296,6 @@ class StartupSerializer(serializers.ModelSerializer):
                 risk_factors += 1
             
             # 2. Debt-to-Assets Ratio (solvency)
-            # Low risk: < 0.4, Medium: 0.4-0.6, High: > 0.6
             if assets > 0:
                 debt_to_assets = liabilities / assets
                 if debt_to_assets < 0.4:
@@ -277,7 +307,6 @@ class StartupSerializer(serializers.ModelSerializer):
                 risk_factors += 1
             
             # 3. Current Ratio (liquidity)
-            # Low risk: > 2.0, Medium: 1.0-2.0, High: < 1.0
             if current_liabilities > 0:
                 current_ratio = current_assets / current_liabilities
                 if current_ratio >= 2.0:
@@ -289,7 +318,6 @@ class StartupSerializer(serializers.ModelSerializer):
                 risk_factors += 1
             
             # 4. Profit Margin
-            # Low risk: > 10%, Medium: 0-10%, High: < 0%
             if revenue > 0:
                 profit_margin = (net_income / revenue) * 100
                 if profit_margin > 10:
@@ -311,7 +339,7 @@ class StartupSerializer(serializers.ModelSerializer):
             
             # Calculate average risk score
             if risk_factors == 0:
-                return 'Medium'  # Default if no data available
+                return None  # No data to calculate risk
             
             avg_risk = risk_score / risk_factors
             
@@ -324,8 +352,8 @@ class StartupSerializer(serializers.ModelSerializer):
                 return 'High'
                 
         except Exception as e:
-            # If calculation fails, return Medium as safe default
-            return 'Medium'
+            # If calculation fails, return None
+            return None
     
     def get_is_in_watchlist(self, obj):
         """Check if the startup is in the current user's watchlist"""

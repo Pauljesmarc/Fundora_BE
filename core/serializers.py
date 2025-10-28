@@ -95,10 +95,12 @@ class StartupSerializer(serializers.ModelSerializer):
 
     reward_potential = serializers.SerializerMethodField()
     projected_return = serializers.SerializerMethodField()
-    risk_level = serializers.SerializerMethodField()  # NEW: Financial risk calculation
+    risk_level = serializers.SerializerMethodField()
     display_industry = serializers.SerializerMethodField()
     is_in_watchlist = serializers.SerializerMethodField()
     tagline = serializers.SerializerMethodField()
+    market_growth_rate = serializers.SerializerMethodField()
+
 
     class Meta:
         model = Startup
@@ -130,11 +132,12 @@ class StartupSerializer(serializers.ModelSerializer):
             'confidence_percentage',
             'reward_potential',
             'projected_return',
-            'risk_level',  # NEW: Add to fields list
+            'risk_level',
             'owner_email',
             'created_at',
             'updated_at',
             'is_in_watchlist',
+            'market_growth_rate',
         ]
 
     def get_tagline(self, obj):
@@ -156,6 +159,23 @@ class StartupSerializer(serializers.ModelSerializer):
         if obj.industry and obj.industry != "—":
             return obj.industry
         return "—"
+    
+    
+    def get_market_growth_rate(self, obj):
+        """Get market growth rate from source deck if available"""
+        if not obj.source_deck:
+            return None
+        
+        try:
+            # Access the OneToOne relationship - will raise DoesNotExist if not present
+            market_analysis = obj.source_deck.market_analysis
+            if market_analysis and market_analysis.market_growth_rate is not None:
+                return float(market_analysis.market_growth_rate)
+        except Exception:
+            # Handle all exceptions (DoesNotExist, AttributeError, etc.)
+            return None
+        
+        return None
 
     def get_reward_potential(self, obj):
         """

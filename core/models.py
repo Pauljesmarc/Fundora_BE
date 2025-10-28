@@ -130,6 +130,7 @@ class Startup(models.Model):
 
     # Funding ask amount (from deck builder)
     funding_ask = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)
+    funding_usage = models.TextField(null=True, blank=True)
     
     # Reference to original deck (if created from deck builder)
     source_deck = models.ForeignKey(Deck, on_delete=models.SET_NULL, null=True, blank=True, related_name='recommended_startups')

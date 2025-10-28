@@ -12,7 +12,7 @@ from django.utils.decorators import method_decorator
 from django.views.decorators.http import require_POST
 from django.forms import ValidationError, inlineformset_factory
 from django.db import transaction
-from django.db.models import F, Value, FloatField, ExpressionWrapper, Case, When
+from django.db.models import F, Value, FloatField, ExpressionWrapper, Case, When, Prefetch
 
 from rest_framework import status
 from rest_framework.views import APIView
@@ -1101,7 +1101,15 @@ class StartupListView(ListAPIView):
         return context
     
     def get_queryset(self):
-        qs = Startup.objects.select_related('owner__user', 'source_deck').all()
+        qs = Startup.objects.select_related(
+            'owner__user',
+            'source_deck'
+        ).prefetch_related(
+            Prefetch(
+                'source_deck__market_analysis',
+                queryset=MarketAnalysis.objects.all()
+            )
+        ).all()
 
         params = self.request.query_params
 

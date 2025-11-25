@@ -796,6 +796,208 @@ class StartupFinancialsView(APIView):
         }
         return Response(data)
     
+class ProfileView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        user = request.user
+        
+        try:
+            registered_user = RegisteredUser.objects.get(user=user)
+            label = registered_user.label
+        except RegisteredUser.DoesNotExist:
+            label = None
+        
+        # Get counts
+        watchlist_count = Watchlist.objects.filter(user=user).count()
+        views_count = StartupView.objects.filter(user=user).count()
+        comparisons_count = ComparisonSet.objects.filter(user=user).count()
+        
+        # Get recent views (last 5)
+        recent_views = StartupView.objects.filter(user=user).select_related('startup').order_by('-viewed_at')[:5]
+        recent_views_data = [
+            {
+                'startup_name': view.startup.company_name,
+                'startup_industry': view.startup.industry,
+                'viewed_at': view.viewed_at.isoformat()
+            }
+            for view in recent_views
+        ]
+        
+        # Get recent comparisons (last 5)
+        recent_comparisons = ComparisonSet.objects.filter(user=user).prefetch_related('startups').order_by('-created_at')[:5]
+        recent_comparisons_data = [
+            {
+                'name': comp.name or str(comp),
+                'startup_count': comp.startup_count,
+                'created_at': comp.created_at.isoformat()
+            }
+            for comp in recent_comparisons
+        ]
+        
+        # Get downloads
+        downloads = Download.objects.filter(user=user).select_related('startup').order_by('-downloaded_at')[:10]
+        downloads_data = [
+            {
+                'startup_name': dl.startup.company_name,
+                'download_type': dl.download_type,
+                'downloaded_at': dl.downloaded_at.isoformat()
+            }
+            for dl in downloads
+        ]
+        
+        return Response({
+            'first_name': user.first_name,
+            'last_name': user.last_name,
+            'email': user.email,
+            'label': label,
+            'watchlist_count': watchlist_count,
+            'views_count': views_count,
+            'comparisons_count': comparisons_count,
+            'recent_views': recent_views_data,
+            'recent_comparisons': recent_comparisons_data,
+            'downloads': downloads_data
+        })
+
+class UpdateProfileView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    def put(self, request):
+        user = request.user
+        data = request.data
+        
+        # Validate email uniqueness (if changed)
+        new_email = data.get('email')
+        if new_email and new_email != user.email:
+            if User.objects.filter(email=new_email).exists():
+                return Response(
+                    {'error': 'Email is already in use'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        
+        # Update user fields
+        user.first_name = data.get('first_name', user.first_name)
+        user.last_name = data.get('last_name', user.last_name)
+        
+        if new_email:
+            user.email = new_email
+            user.username = new_email  # Update username too if it's based on email
+        
+        user.save()
+        
+        return Response({
+            'message': 'Profile updated successfully',
+            'first_name': user.first_name,
+            'last_name': user.last_name,
+            'email': user.email
+        })
+    
+class StartupProfileAccountView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        user = request.user
+        
+        try:
+            registered_user = RegisteredUser.objects.get(user=user)
+            
+            # Verify this is a startup user
+            if registered_user.label != 'startup':
+                return Response(
+                    {'error': 'This endpoint is only for startup users'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            
+        except RegisteredUser.DoesNotExist:
+            return Response(
+                {'error': 'User profile not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        # Get startup's companies
+        startups = Startup.objects.filter(owner=registered_user).order_by('-created_at')
+        startups_count = startups.count()
+        
+        # Get startup's pitch decks
+        decks = Deck.objects.filter(owner=registered_user).order_by('-created_at')
+        decks_count = decks.count()
+        
+        # Get total views across all startups
+        views_count = StartupView.objects.filter(
+            startup__owner=registered_user
+        ).count()
+        
+        # Prepare startups data
+        startups_data = [
+            {
+                'id': startup.id,
+                'company_name': startup.company_name,
+                'industry': startup.industry,
+                'created_at': startup.created_at.isoformat(),
+                'is_deck_builder': startup.is_deck_builder
+            }
+            for startup in startups[:10]  # Limit to 10 most recent
+        ]
+        
+        # Prepare decks data
+        decks_data = [
+            {
+                'id': deck.id,
+                'company_name': deck.company_name,
+                'tagline': deck.tagline,
+                'created_at': deck.created_at.isoformat()
+            }
+            for deck in decks[:10]  # Limit to 10 most recent
+        ]
+        
+        # Get recent activity
+        recent_activity = []
+        
+        # Add recent startup registrations
+        for startup in startups[:5]:
+            recent_activity.append({
+                'type': 'startup',
+                'description': f'Registered {startup.company_name}',
+                'timestamp': startup.created_at.isoformat()
+            })
+        
+        # Add recent deck creations
+        for deck in decks[:5]:
+            recent_activity.append({
+                'type': 'deck',
+                'description': f'Created pitch deck for {deck.company_name}',
+                'timestamp': deck.created_at.isoformat()
+            })
+        
+        # Add recent views on their startups
+        recent_views = StartupView.objects.filter(
+            startup__owner=registered_user
+        ).select_related('startup', 'user').order_by('-viewed_at')[:5]
+        
+        for view in recent_views:
+            recent_activity.append({
+                'type': 'view',
+                'description': f'{view.user.email} viewed {view.startup.company_name}',
+                'timestamp': view.viewed_at.isoformat()
+            })
+        
+        # Sort activity by timestamp (most recent first)
+        recent_activity.sort(key=lambda x: x['timestamp'], reverse=True)
+        recent_activity = recent_activity[:15]  # Limit to 15 most recent activities
+        
+        return Response({
+            'first_name': user.first_name,
+            'last_name': user.last_name,
+            'email': user.email,
+            'label': registered_user.label,
+            'startups_count': startups_count,
+            'decks_count': decks_count,
+            'views_count': views_count,
+            'startups': startups_data,
+            'decks': decks_data,
+            'recent_activity': recent_activity
+        })
+    
 class StartupProfileView(APIView):
     permission_classes = [AllowAny]
 
@@ -1264,7 +1466,6 @@ def get_startup_analytics(startup):
         'recent_comparisons': recent_comparisons,
     }
 
-
 def get_risk_level(confidence):
     """Helper function to get risk level based on confidence"""
     if confidence == 'High':
@@ -1310,27 +1511,15 @@ class investment_simulation(APIView):
         if startup_id:
             selected_startup = get_object_or_404(Startup, id=startup_id)
 
-        # Canonical CAPM-based growth rate with bounds
+        # Use the projected_return directly (which is already CAGR with risk adjustment)
         if selected_startup:
+            # projected_return is already calculated using CAGR with risk adjustment
+            # from calculate_projected_return() function
+            growth_rate = (selected_startup.projected_return or 7) / 100
             risk_level = selected_startup.risk_level or "Medium"
-            projected_return = selected_startup.projected_return or 10  # percent form
-            projected_return = projected_return / 100
-
-            # Canonical CAPM parameters
-            RISK_FREE_RATE = 0.03
-            MARKET_RETURN = 0.10
-            BETA_VALUES = {"Low": 0.8, "Medium": 1.0, "High": 1.3}
-
-            beta = BETA_VALUES.get(risk_level, 1.0)
-            capm_rate = RISK_FREE_RATE + beta * (MARKET_RETURN - RISK_FREE_RATE)
-
-            # Blend CAPM with startup projected return (weighted realism)
-            growth_rate = (0.6 * capm_rate) + (0.4 * projected_return)
-
-            # Clamp realistic annual growth rate between 2% and 25%
-            growth_rate = max(min(growth_rate, 0.25), 0.02)
         else:
-            growth_rate = 0.07  # baseline for unspecified startup (7%)
+            growth_rate = 0.07
+            risk_level = "Medium"
 
         # Canonical CAGR compound formula
         final_value = investment_amount * (1 + growth_rate) ** duration_years
@@ -1378,7 +1567,7 @@ class investment_simulation(APIView):
             "chart_data": chart_data,
             "risk_level": f"{risk_level} Risk" if selected_startup else "Medium Risk",
             "risk_color": risk_color,
-            "calculation_method": "Canonical CAPM + CAGR",
+            "calculation_method": "Revenue CAGR with Risk Adjustment",
             "startup": {
                 "id": selected_startup.id,
                 "name": selected_startup.company_name,
@@ -1387,127 +1576,6 @@ class investment_simulation(APIView):
                 "risk_level": selected_startup.risk_level,
             } if selected_startup else None,
         })
-
-# Additional helper functions for advanced calculations
-#TODO: REMOVE CAPM
-def calculate_capm_growth_rate(projected_return, risk_level):
-    """
-    Canonical CAPM-based annual growth rate.
-    Expected Return = Rf + β × (E[Rm] - Rf)
-    Then blended with the startup's projected return.
-    """
-    RISK_FREE_RATE = 0.03   # government bonds baseline
-    MARKET_RETURN = 0.10    # market average 10%
-    BETA_VALUES = {"Low": 0.8, "Medium": 1.0, "High": 1.3}
-
-    beta = BETA_VALUES.get(risk_level, 1.0)
-    capm_expected = RISK_FREE_RATE + beta * (MARKET_RETURN - RISK_FREE_RATE)
-
-    # blend CAPM with the startup's own return expectation
-    projected_return = max(min(projected_return, 0.25), 0.02)
-    growth_rate = (0.6 * capm_expected) + (0.4 * projected_return)
-
-    return max(min(growth_rate, 0.25), 0.02)
-
-#TODO: REMOVE
-def calculate_monthly_contributions(principal, monthly_contribution, annual_rate, years):
-    """Canonical future value with monthly compounding and contributions."""
-    monthly_rate = annual_rate / 12
-    months = years * 12
-
-    fv_principal = principal * (1 + monthly_rate) ** months
-
-    if monthly_rate > 0:
-        fv_contributions = monthly_contribution * (((1 + monthly_rate) ** months - 1) / monthly_rate)
-    else:
-        fv_contributions = monthly_contribution * months
-
-    return fv_principal + fv_contributions
-
-#TODO: REMOVE
-def calculate_inflation_adjusted_return(nominal_return, inflation_rate, years):
-    """Canonical Fisher equation for real return."""
-    real_rate = ((1 + nominal_return) / (1 + inflation_rate)) - 1
-    return round(real_rate, 4)
-
-#TODO: REMOVE
-def monte_carlo_simulation(principal, annual_return, volatility, years, simulations=1000):
-    """Canonical Monte Carlo simulation for investment returns."""
-    volatility = max(min(volatility, 0.3), 0.05)  # limit to 5–30% volatility
-
-    results = []
-    for _ in range(simulations):
-        value = principal
-        for _ in range(years):
-            yearly_return = random.normalvariate(annual_return, volatility)
-            yearly_return = max(min(yearly_return, 0.5), -0.5)  # bound annual shocks ±50%
-            value *= (1 + yearly_return)
-        results.append(value)
-
-    results.sort()
-    n = len(results)
-
-    return {
-        "mean": sum(results) / n,
-        "median": results[n // 2],
-        "percentile_10": results[int(n * 0.1)],
-        "percentile_25": results[int(n * 0.25)],
-        "percentile_75": results[int(n * 0.75)],
-        "percentile_90": results[int(n * 0.9)],
-        "min": results[0],
-        "max": results[-1],
-    }
-
-#TODO: REMOVE
-class advanced_investment_simulation(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request):
-        try:
-            investment_amount = float(request.data.get('investment_amount', 0))
-            duration_years = int(request.data.get('duration_years', 1))
-            growth_rate = float(request.data.get('growth_rate', 5)) / 100
-            monthly_contribution = float(request.data.get('monthly_contribution', 0))
-            inflation_rate = float(request.data.get('inflation_rate', 2)) / 100
-
-            if investment_amount <= 0 or duration_years <= 0:
-                raise ValueError("Investment amount and duration must be positive")
-        except (ValueError, TypeError) as e:
-            return Response({"error": str(e)}, status=400)
-
-        final_value = investment_amount * (1 + growth_rate) ** duration_years
-
-        if monthly_contribution > 0:
-            final_value_with_contributions = calculate_monthly_contributions(
-                investment_amount, monthly_contribution, growth_rate, duration_years
-            )
-        else:
-            final_value_with_contributions = final_value
-
-        real_growth_rate = calculate_inflation_adjusted_return(growth_rate, inflation_rate, 1)
-        inflation_adjusted_value = investment_amount * (1 + real_growth_rate) ** duration_years
-
-        volatility = 0.15
-        monte_carlo_results = monte_carlo_simulation(
-            investment_amount, growth_rate, volatility, duration_years
-        )
-
-        total_contributions = monthly_contribution * 12 * duration_years
-
-        return Response({
-            "simulation_run": True,
-            "investment_amount": investment_amount,
-            "duration_years": duration_years,
-            "growth_rate": growth_rate * 100,
-            "monthly_contribution": monthly_contribution,
-            "inflation_rate": inflation_rate * 100,
-            "final_value": final_value,
-            "final_value_with_contributions": final_value_with_contributions,
-            "inflation_adjusted_value": inflation_adjusted_value,
-            "monte_carlo_results": monte_carlo_results,
-            "total_contributions": total_contributions,
-            "real_growth_rate": real_growth_rate * 100
-        }, status=200)
 
 #TODO: UPDATE
 class calculate_investment_api(APIView):
@@ -1528,14 +1596,12 @@ class calculate_investment_api(APIView):
         if startup_id:
             selected_startup = get_object_or_404(Startup, id=startup_id)
 
-        # Use CAPM to calculate growth rate if startup exists
         if selected_startup:
-            projected_return = selected_startup.projected_return / 100 if selected_startup.projected_return else 0.12
+            growth_rate = (selected_startup.projected_return or 7) / 100
             risk_level = selected_startup.risk_level or 'Medium'
-            growth_rate = calculate_capm_growth_rate(projected_return, risk_level)
         else:
-            # Use user-provided growth rate or default
             growth_rate = float(request.data.get('growth_rate', 5)) / 100
+            risk_level = 'Medium'
 
         final_value = investment_amount * (1 + growth_rate) ** duration_years
         total_gain = final_value - investment_amount
@@ -1561,7 +1627,7 @@ class calculate_investment_api(APIView):
             'roi_percentage': round(roi_percentage, 2),
             'growth_rate': round(growth_rate * 100, 2),
             'yearly_breakdown': yearly_breakdown,
-            'calculation_method': 'CAPM' if selected_startup else 'Custom Rate',
+            'calculation_method': 'Revenue CAGR (Risk-Adjusted)' if selected_startup else 'Custom Rate',
             'startup_info': {
                 'id': selected_startup.id,
                 'name': selected_startup.company_name,

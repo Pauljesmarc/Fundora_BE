@@ -60,7 +60,7 @@ urlpatterns = [
     path('startup/company-info/', views.company_information_form.as_view(), name='company_information_form'),
     path('startup/health-report/', views.health_report_page.as_view(), name='health_report_page'),
     path('startup/add/', views.add_startup, name='add_startup'),
-    path('startup/<int:startup_id>/delete/', views.delete_startup, name='delete_startup'),
+    path('startup/<int:startup_id>/delete/', views.delete_startup.as_view(), name='delete_startup'),
     path('startup/<int:startup_id>/edit/', views.startup_detail.as_view(), name='edit_startup'),
     path('startup/<int:startup_id>/report/', views.view_startup_report.as_view(), name='view_startup_report'),
 

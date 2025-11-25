@@ -138,6 +138,13 @@ class StartupSerializer(serializers.ModelSerializer):
             'updated_at',
             'is_in_watchlist',
             'market_growth_rate',
+            'current_revenue',
+            'previous_revenue',
+            'time_between_periods',
+            'retained_earnings',
+            'ebit',
+            'current_assets',
+            'current_liabilities',
         ]
 
     def get_tagline(self, obj):
@@ -179,181 +186,148 @@ class StartupSerializer(serializers.ModelSerializer):
 
     def get_reward_potential(self, obj):
         """
-        Calculate reward potential based on profit margin and other factors
-        Returns a score from 1-5
+        Uses Return on Equity (ROE) to measure profitability
+        ROE = (Net Income / Shareholder Equity) × 100
+        Matches calculate_reward_potential() function in views.py
         """
         try:
-            revenue = float(obj.revenue or 0)
             net_income = float(obj.net_income or 0)
-            assets = float(obj.total_assets or 0)
-            liabilities = float(obj.total_liabilities or 0)
+            shareholder_equity = float(obj.shareholder_equity or 0)
+            total_assets = float(obj.total_assets or 0)
+
+            # Check if we have ANY usable data
+            if shareholder_equity <= 0 and total_assets <= 0:
+                return "N/A"
             
-            if revenue <= 0 or assets <= 0:
-                return None
-            
-            # Profit margin
-            profit_margin = net_income / revenue
-            
-            # Return on Assets
-            roa = net_income / assets
-            
-            # Debt ratio consideration
-            debt_ratio = liabilities / assets if assets > 0 else 0
-            
-            # Weighted composite score
-            base_score = (profit_margin * 3 + roa * 2) * 100
-            base_score = max(min(base_score, 100), -100)
-            
-            # Adjust for debt (high debt reduces potential)
-            debt_adjustment = 1.0 - min(debt_ratio, 1.0) * 0.3
-            adjusted_score = base_score * debt_adjustment
-            
-            # Map to 1-5 scale
-            if adjusted_score >= 60:
-                return 5
-            elif adjusted_score >= 40:
-                return 4
-            elif adjusted_score >= 20:
-                return 3
-            elif adjusted_score > 0:
-                return 2
-            else:
-                return 1
+            # Primary: Calculate ROE
+            if shareholder_equity > 0:
+                roe_percentage = (net_income / shareholder_equity) * 100    
                 
-        except Exception:
-            return None
+                # Convert ROE to 1-5 scale
+                if roe_percentage >= 20:
+                    return 5.0  # Excellent
+                elif roe_percentage >= 15:
+                    return 4.0  # Good ← Your 18.75% should hit here
+                elif roe_percentage >= 10:
+                    return 3.0  # Average
+                elif roe_percentage >= 5:
+                    return 2.0  # Below Average
+                else:
+                    return 1.0  # Low Reward
+            
+            # Fallback: Calculate ROA if equity not available
+            elif total_assets > 0:
+                roa_percentage = (net_income / total_assets) * 100
+                
+                # Convert ROA to 1-5 scale
+                if roa_percentage >= 15:
+                    return 5.0
+                elif roa_percentage >= 10:
+                    return 4.0
+                elif roa_percentage >= 5:
+                    return 3.0
+                elif roa_percentage >= 2:
+                    return 2.0
+                else:
+                    return 1.0
+            
+            return "N/A"
+            
+        except Exception as e:
+            print(f"Reward potential calculation error: {e}")
+            return "N/A"
 
     def get_projected_return(self, obj):
         """
-        Calculate projected return (ROE or ROA)
-        ROE = Net Income / Shareholder Equity
-        If equity unavailable, use ROA = Net Income / Total Assets
+        Calculate projected return using Revenue CAGR with risk adjustment
+        Matches calculate_projected_return() function in views.py
         """
         try:
-            net_income = float(obj.net_income or 0)
-            equity = float(obj.shareholder_equity or 0)
-            assets = float(obj.total_assets or 0)
+            current_revenue = float(obj.revenue or getattr(obj, 'current_revenue', 0) or 0)
+            previous_revenue = float(getattr(obj, 'previous_revenue', 0) or 0)
+            time_between_periods = float(getattr(obj, 'time_between_periods', 1) or 1)
             
-            # Prefer ROE (Return on Equity)
-            if equity > 0:
-                return round((net_income / equity) * 100, 2)
-            # Fallback to ROA (Return on Assets)
-            elif assets > 0:
-                return round((net_income / assets) * 100, 2)
+            # Validate data availability
+            if current_revenue <= 0 or previous_revenue <= 0 or time_between_periods <= 0:
+                # Fallback to simple profit margin if no revenue growth data
+                net_income = float(obj.net_income or 0)
+                if current_revenue > 0:
+                    profit_margin = (net_income / current_revenue) * 100
+                    return round(max(profit_margin, 0), 2)
+                return 0.0
             
-            return None
-        except Exception:
-            return None
+            # Step 1: Calculate CAGR
+            revenue_ratio = current_revenue / previous_revenue
+            cagr = (math.pow(revenue_ratio, 1 / time_between_periods) - 1) * 100
+            
+            # Cap CAGR at reasonable limits
+            cagr = max(min(cagr, 100), -50)
+            
+            # Step 2: Get Risk Level and Apply Adjustment Factor
+            risk_level = self.get_risk_level(obj)
+            
+            if risk_level == 'Low':
+                adjustment_factor = 1.00  # Aggressive
+            elif risk_level == 'Medium':
+                adjustment_factor = 0.85  # Moderate
+            else:  # High risk or None
+                adjustment_factor = 0.70  # Conservative
+            
+            # Step 3: Calculate Risk-Adjusted Projected Return
+            projected_return = cagr * adjustment_factor
+            
+            return round(projected_return, 2)
+            
+        except Exception as e:
+            print(f"Projected return calculation error: {e}")
+            return 0.0
     
     def get_risk_level(self, obj):
         """
-        Calculate financial risk level based on multiple financial metrics.
+        Uses Original Altman Z-Score for comprehensive risk assessment
+        Z = 1.2A + 1.4B + 3.3C + 0.6D + 1.0E
+        Matches calculate_financial_risk() function in views.py
         
-        For pitch decks (startups with source_deck), returns None since complicated
-        and financial for financial risk.
-        
-        For financial startups, calculates risk based on:
-        - Debt-to-Equity Ratio
-        - Debt-to-Assets Ratio
-        - Current Ratio (liquidity)
-        - Profit Margin
-        - Net Income status
-        
-        Returns: 'Low', 'Medium', 'High', or None (for pitch decks)
+        Returns: 'Low', 'Medium', 'High', 'No Data', or 'Error'
         """
-        # Pitch decks don't have financial risk - return None
-        if obj.source_deck or obj.is_deck_builder:
-            return None
-        
         try:
-            # Extract financial data
-            equity = float(obj.shareholder_equity or 0)
-            liabilities = float(obj.total_liabilities or 0)
-            assets = float(obj.total_assets or 0)
-            revenue = float(obj.revenue or 0)
-            net_income = float(obj.net_income or 0)
+            total_assets = float(obj.total_assets or 0)
+            total_liabilities = float(obj.total_liabilities or 0)
+            shareholder_equity = float(obj.shareholder_equity or 0)
+            retained_earnings = float(getattr(obj, 'retained_earnings', 0) or 0)
+            ebit = float(getattr(obj, 'ebit', 0) or 0)
+            current_assets = float(getattr(obj, 'current_assets', 0) or 0)
+            current_liabilities = float(getattr(obj, 'current_liabilities', 0) or 0)
+            revenue = float(obj.revenue or getattr(obj, 'current_revenue', 0) or 0)
             
-            # If no financial data at all, return None
-            if all(v == 0 for v in [equity, liabilities, assets, revenue, net_income]):
-                return None
+            # Validate minimum data requirements
+            if total_assets <= 0:
+                return 'No Data'
             
-            # Estimate current assets/liabilities if not available
-            current_assets = float(getattr(obj, 'current_assets', assets * 0.6) or 0)
-            current_liabilities = float(getattr(obj, 'current_liabilities', liabilities * 0.5) or 0)
+            # Calculate Working Capital
+            working_capital = current_assets - current_liabilities
             
-            risk_score = 0
-            risk_factors = 0
+            # Calculate Z-Score components
+            A = working_capital / total_assets
+            B = retained_earnings / total_assets
+            C = ebit / total_assets
+            D = shareholder_equity / total_liabilities if total_liabilities > 0 else 1.0
+            E = revenue / total_assets
             
-            # 1. Debt-to-Equity Ratio (financial leverage)
-            if equity > 0:
-                debt_to_equity = liabilities / equity
-                if debt_to_equity < 1.0:
-                    risk_score += 1  # Low risk
-                elif debt_to_equity < 2.0:
-                    risk_score += 2  # Medium risk
-                else:
-                    risk_score += 3  # High risk
-                risk_factors += 1
+            # Calculate Altman Z-Score
+            z_score = (1.2 * A) + (1.4 * B) + (3.3 * C) + (0.6 * D) + (1.0 * E)
             
-            # 2. Debt-to-Assets Ratio (solvency)
-            if assets > 0:
-                debt_to_assets = liabilities / assets
-                if debt_to_assets < 0.4:
-                    risk_score += 1
-                elif debt_to_assets < 0.6:
-                    risk_score += 2
-                else:
-                    risk_score += 3
-                risk_factors += 1
-            
-            # 3. Current Ratio (liquidity)
-            if current_liabilities > 0:
-                current_ratio = current_assets / current_liabilities
-                if current_ratio >= 2.0:
-                    risk_score += 1
-                elif current_ratio >= 1.0:
-                    risk_score += 2
-                else:
-                    risk_score += 3
-                risk_factors += 1
-            
-            # 4. Profit Margin
-            if revenue > 0:
-                profit_margin = (net_income / revenue) * 100
-                if profit_margin > 10:
-                    risk_score += 1
-                elif profit_margin >= 0:
-                    risk_score += 2
-                else:
-                    risk_score += 3
-                risk_factors += 1
-            
-            # 5. Net Income Status
-            if net_income > 0:
-                risk_score += 1  # Profitable = Low risk
-            elif net_income == 0:
-                risk_score += 2  # Break-even = Medium risk
+            # Interpret Z-Score
+            if z_score > 2.99:
+                return 'Low'      # Safe Zone
+            elif z_score > 1.81:
+                return 'Medium'   # Grey Zone ← Your 1.93 should be here
             else:
-                risk_score += 3  # Loss = High risk
-            risk_factors += 1
-            
-            # Calculate average risk score
-            if risk_factors == 0:
-                return None  # No data to calculate risk
-            
-            avg_risk = risk_score / risk_factors
-            
-            # Map to risk levels
-            if avg_risk <= 1.5:
-                return 'Low'
-            elif avg_risk <= 2.3:
-                return 'Medium'
-            else:
-                return 'High'
+                return 'High'     # Distress Zone
                 
         except Exception as e:
-            # If calculation fails, return None
-            return None
+            print(f"Risk calculation error: {e}")
+            return 'Error'
     
     def get_is_in_watchlist(self, obj):
         """Check if the startup is in the current user's watchlist"""

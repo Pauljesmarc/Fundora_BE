@@ -10,6 +10,7 @@ from .views import (
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from .views import TestAPI
+from .views import add_deck_to_recommended, delete_startup
 
 import inspect
 print("SaveComparisonView type:", type(getattr(views, 'SaveComparisonView', None)))
@@ -26,9 +27,9 @@ urlpatterns = [
     path('index/', views.index.as_view(), name='index'),
     path('deck/', views.deck_home.as_view(), name='deck_home'),
     path('deck/create/', views.create_new_deck.as_view(), name='deck_create'),
-    path('deck/add-to-recommended/', views.add_deck_to_recommended, name='add_deck_to_recommended'),
+    path('deck/add-to-recommended/', add_deck_to_recommended.as_view(), name='add_deck_to_recommended'),
     path('deck/<int:deck_id>/edit/', views.edit_deck.as_view(), name='edit_deck'),
-    path('deck/<int:deck_id>/delete/', views.delete_deck.as_view(), name='deck_delete'),
+    path('startup/<int:startup_id>/delete/', delete_startup.as_view(), name='delete_startup'),
     path('deck/section/<str:section>/', views.deck_builder.as_view(), name='deck_section'),
     path('deck/section-list/', views.section_list.as_view(), name='section_list'),
 

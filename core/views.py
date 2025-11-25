@@ -430,209 +430,209 @@ class dashboard(APIView):
 # ========================================
 # FINANCIAL RISK - USING ORIGINAL ALTMAN Z-SCORE
 # ========================================
-def calculate_financial_risk(startup):
-    """
-    Uses Original Altman Z-Score for comprehensive risk assessment
-    Z = 1.2A + 1.4B + 3.3C + 0.6D + 1.0E
+# def calculate_financial_risk(startup):
+#     """
+#     Uses Original Altman Z-Score for comprehensive risk assessment
+#     Z = 1.2A + 1.4B + 3.3C + 0.6D + 1.0E
     
-    Where:
-    A = Working Capital / Total Assets
-    B = Retained Earnings / Total Assets
-    C = EBIT / Total Assets
-    D = Book Value of Equity / Total Liabilities
-    E = Sales (Revenue) / Total Assets
+#     Where:
+#     A = Working Capital / Total Assets
+#     B = Retained Earnings / Total Assets
+#     C = EBIT / Total Assets
+#     D = Book Value of Equity / Total Liabilities
+#     E = Sales (Revenue) / Total Assets
     
-    Interpetation:
-    - Z > 2.99 = Low Risk (Safe Zone)
-    - 1.81 < Z < 2.99 = Medium Risk (Grey Zone)
-    - Z < 1.81 = High Risk (Distress Zone)
-    """
-    try:
-        total_assets = float(startup.total_assets or 0)
-        total_liabilities = float(startup.total_liabilities or 0)
-        shareholder_equity = float(startup.shareholder_equity or 0)
-        retained_earnings = float(getattr(startup, 'retained_earnings', 0) or 0)
-        ebit = float(getattr(startup, 'ebit', 0) or 0)
-        current_assets = float(getattr(startup, 'current_assets', 0) or 0)
-        current_liabilities = float(getattr(startup, 'current_liabilities', 0) or 0)
-        revenue = float(startup.revenue or getattr(startup, 'current_revenue', 0) or 0)
+#     Interpetation:
+#     - Z > 2.99 = Low Risk (Safe Zone)
+#     - 1.81 < Z < 2.99 = Medium Risk (Grey Zone)
+#     - Z < 1.81 = High Risk (Distress Zone)
+#     """
+#     try:
+#         total_assets = float(startup.total_assets or 0)
+#         total_liabilities = float(startup.total_liabilities or 0)
+#         shareholder_equity = float(startup.shareholder_equity or 0)
+#         retained_earnings = float(getattr(startup, 'retained_earnings', 0) or 0)
+#         ebit = float(getattr(startup, 'ebit', 0) or 0)
+#         current_assets = float(getattr(startup, 'current_assets', 0) or 0)
+#         current_liabilities = float(getattr(startup, 'current_liabilities', 0) or 0)
+#         revenue = float(startup.revenue or getattr(startup, 'current_revenue', 0) or 0)
         
-        # Validate minimum data requirements
-        if total_assets <= 0:
-            return 'No Data'
+#         # Validate minimum data requirements
+#         if total_assets <= 0:
+#             return 'No Data'
         
-        # Calculate Working Capital
-        working_capital = current_assets - current_liabilities
+#         # Calculate Working Capital
+#         working_capital = current_assets - current_liabilities
         
-        # Calculate Z-Score components
-        A = working_capital / total_assets
-        B = retained_earnings / total_assets
-        C = ebit / total_assets
-        D = shareholder_equity / total_liabilities if total_liabilities > 0 else 1.0
-        E = revenue / total_assets
+#         # Calculate Z-Score components
+#         A = working_capital / total_assets
+#         B = retained_earnings / total_assets
+#         C = ebit / total_assets
+#         D = shareholder_equity / total_liabilities if total_liabilities > 0 else 1.0
+#         E = revenue / total_assets
         
-        # Calculate Altman Z-Score
-        z_score = (1.2 * A) + (1.4 * B) + (3.3 * C) + (0.6 * D) + (1.0 * E)
+#         # Calculate Altman Z-Score
+#         z_score = (1.2 * A) + (1.4 * B) + (3.3 * C) + (0.6 * D) + (1.0 * E)
         
-        # Interpret Z-Score
-        if z_score > 2.99:
-            return 'Low'      # Safe Zone
-        elif z_score > 1.81:
-            return 'Medium'   # Grey Zone
-        else:
-            return 'High'     # Distress Zone
+#         # Interpret Z-Score
+#         if z_score > 2.99:
+#             return 'Low'      # Safe Zone
+#         elif z_score > 1.81:
+#             return 'Medium'   # Grey Zone
+#         else:
+#             return 'High'     # Distress Zone
             
-    except Exception as e:
-        # If calculation fails
-        print(f"Risk calculation error: {e}")
-        return 'Error'
+#     except Exception as e:
+#         # If calculation fails
+#         print(f"Risk calculation error: {e}")
+#         return 'Error'
 
-# ========================================
-# PROJECTED RETURN - USING CAGR WITH RISK ADJUSTMENT
-# ========================================
-def calculate_projected_return(startup):
-    """
-    Calculate projected return using Revenue CAGR with risk adjustment
+# # ========================================
+# # PROJECTED RETURN - USING CAGR WITH RISK ADJUSTMENT
+# # ========================================
+# def calculate_projected_return(startup):
+#     """
+#     Calculate projected return using Revenue CAGR with risk adjustment
     
-    Step 1: Calculate CAGR
-    CAGR = [(Current Revenue / Prior Revenue)^(1/Time Period) - 1] × 100
+#     Step 1: Calculate CAGR
+#     CAGR = [(Current Revenue / Prior Revenue)^(1/Time Period) - 1] × 100
     
-    Step 2: Apply Risk Adjustment Factor
-    - Low Risk: CAGR × 1.00 (Aggressive - company is stable)
-    - Medium Risk: CAGR × 0.85 (Moderate - some uncertainty)
-    - High Risk: CAGR × 0.70 (Conservative - significant risk)
-    Note:
-    The risk adjustment isn't canon, it's just someting I added
+#     Step 2: Apply Risk Adjustment Factor
+#     - Low Risk: CAGR × 1.00 (Aggressive - company is stable)
+#     - Medium Risk: CAGR × 0.85 (Moderate - some uncertainty)
+#     - High Risk: CAGR × 0.70 (Conservative - significant risk)
+#     Note:
+#     The risk adjustment isn't canon, it's just someting I added
     
-    Step 3: Return Risk-Adjusted Growth Rate
-    This represents the expected annual return percentage for investors
-    """
-    try:
-        current_revenue = float(startup.revenue or getattr(startup, 'current_revenue', 0) or 0)
-        previous_revenue = float(getattr(startup, 'previous_revenue', 0) or 0)
-        time_between_periods = float(getattr(startup, 'time_between_periods', 1) or 1)
+#     Step 3: Return Risk-Adjusted Growth Rate
+#     This represents the expected annual return percentage for investors
+#     """
+#     try:
+#         current_revenue = float(startup.revenue or getattr(startup, 'current_revenue', 0) or 0)
+#         previous_revenue = float(getattr(startup, 'previous_revenue', 0) or 0)
+#         time_between_periods = float(getattr(startup, 'time_between_periods', 1) or 1)
         
-        # Validate data availability
-        if current_revenue <= 0 or previous_revenue <= 0 or time_between_periods <= 0:
-            # Fallback to simple profit margin if no revenue growth data
-            net_income = float(startup.net_income or 0)
-            if current_revenue > 0:
-                profit_margin = (net_income / current_revenue) * 100
-                return round(max(profit_margin, 0), 2)  # Return non-negative
-            return 0.0
+#         # Validate data availability
+#         if current_revenue <= 0 or previous_revenue <= 0 or time_between_periods <= 0:
+#             # Fallback to simple profit margin if no revenue growth data
+#             net_income = float(startup.net_income or 0)
+#             if current_revenue > 0:
+#                 profit_margin = (net_income / current_revenue) * 100
+#                 return round(max(profit_margin, 0), 2)  # Return non-negative
+#             return 0.0
         
-        # Step 1: Calculate CAGR
-        revenue_ratio = current_revenue / previous_revenue
-        cagr = (math.pow(revenue_ratio, 1 / time_between_periods) - 1) * 100
+#         # Step 1: Calculate CAGR
+#         revenue_ratio = current_revenue / previous_revenue
+#         cagr = (math.pow(revenue_ratio, 1 / time_between_periods) - 1) * 100
         
-        # Cap CAGR at reasonable limits to avoid extreme outliers
-        # Min: -50% (severe decline), Max: 100% (doubling year-over-year)
-        cagr = max(min(cagr, 100), -50)
+#         # Cap CAGR at reasonable limits to avoid extreme outliers
+#         # Min: -50% (severe decline), Max: 100% (doubling year-over-year)
+#         cagr = max(min(cagr, 100), -50)
         
-        # Step 2: Get Risk Level and Apply Adjustment Factor
-        risk_level = calculate_financial_risk(startup)
+#         # Step 2: Get Risk Level and Apply Adjustment Factor
+#         risk_level = calculate_financial_risk(startup)
         
-        if risk_level == 'Low':
-            adjustment_factor = 1.00  # Aggressive
-        elif risk_level == 'Medium':
-            adjustment_factor = 0.85  # Moderate
-        else:  # High risk
-            adjustment_factor = 0.70  # Conservative
+#         if risk_level == 'Low':
+#             adjustment_factor = 1.00  # Aggressive
+#         elif risk_level == 'Medium':
+#             adjustment_factor = 0.85  # Moderate
+#         else:  # High risk
+#             adjustment_factor = 0.70  # Conservative
         
-        # Step 3: Calculate Risk-Adjusted Projected Return
-        projected_return = cagr * adjustment_factor
+#         # Step 3: Calculate Risk-Adjusted Projected Return
+#         projected_return = cagr * adjustment_factor
         
-        return round(projected_return, 2)
+#         return round(projected_return, 2)
         
-    except Exception as e:
-        print(f"Projected return calculation error: {e}")
-        return 0.0
+#     except Exception as e:
+#         print(f"Projected return calculation error: {e}")
+#         return 0.0
 
-# ========================================
-# REWARD POTENTIAL - USING ROE (RETURN ON EQUITY)
-# ========================================
-def calculate_reward_potential(startup):
-    """
-    Uses Return on Equity (ROE) to measure profitability
-    ROE = (Net Income / Shareholder Equity) × 100
+# # ========================================
+# # REWARD POTENTIAL - USING ROE (RETURN ON EQUITY)
+# # ========================================
+# def calculate_reward_potential(startup):
+#     """
+#     Uses Return on Equity (ROE) to measure profitability
+#     ROE = (Net Income / Shareholder Equity) × 100
     
-    Converts ROE to 1-5 scale:
-    - ROE < 5%: 1/5 (Low Reward)
-    - ROE 5-10%: 2/5 (Below Average)
-    - ROE 10-15%: 3/5 (Average)
-    - ROE 15-20%: 4/5 (Good)
-    - ROE > 20%: 5/5 (Excellent)
+#     Converts ROE to 1-5 scale:
+#     - ROE < 5%: 1/5 (Low Reward)
+#     - ROE 5-10%: 2/5 (Below Average)
+#     - ROE 10-15%: 3/5 (Average)
+#     - ROE 15-20%: 4/5 (Good)
+#     - ROE > 20%: 5/5 (Excellent)
     
-    Fallback to ROA if equity is not available:
-    ROA = (Net Income / Total Assets) × 100
-    """
-    try:
-        net_income = float(startup.net_income or 0)
-        shareholder_equity = float(startup.shareholder_equity or 0)
-        total_assets = float(startup.total_assets or 0)
+#     Fallback to ROA if equity is not available:
+#     ROA = (Net Income / Total Assets) × 100
+#     """
+#     try:
+#         net_income = float(startup.net_income or 0)
+#         shareholder_equity = float(startup.shareholder_equity or 0)
+#         total_assets = float(startup.total_assets or 0)
 
-        # Check if we have ANY usable data
-        if shareholder_equity <= 0 and total_assets <= 0:
-            return "N/A"
+#         # Check if we have ANY usable data
+#         if shareholder_equity <= 0 and total_assets <= 0:
+#             return "N/A"
         
-        # Primary: Calculate ROE
-        if shareholder_equity > 0:
-            roe_percentage = (net_income / shareholder_equity) * 100    
+#         # Primary: Calculate ROE
+#         if shareholder_equity > 0:
+#             roe_percentage = (net_income / shareholder_equity) * 100    
             
-            # Convert ROE to 1-5 scale
-            if roe_percentage >= 20:
-                return 5.0  # Excellent
-            elif roe_percentage >= 15:
-                return 4.0  # Good
-            elif roe_percentage >= 10:
-                return 3.0  # Average
-            elif roe_percentage >= 5:
-                return 2.0  # Below Average
-            else:
-                return 1.0  # Low Reward
+#             # Convert ROE to 1-5 scale
+#             if roe_percentage >= 20:
+#                 return 5.0  # Excellent
+#             elif roe_percentage >= 15:
+#                 return 4.0  # Good
+#             elif roe_percentage >= 10:
+#                 return 3.0  # Average
+#             elif roe_percentage >= 5:
+#                 return 2.0  # Below Average
+#             else:
+#                 return 1.0  # Low Reward
         
-        # Fallback: Calculate ROA if equity not available
-        elif total_assets > 0:
-            roa_percentage = (net_income / total_assets) * 100
+#         # Fallback: Calculate ROA if equity not available
+#         elif total_assets > 0:
+#             roa_percentage = (net_income / total_assets) * 100
             
-            # Convert ROA to 1-5 scale (ROA benchmarks are lower than ROE)
-            if roa_percentage >= 15:
-                return 5.0
-            elif roa_percentage >= 10:
-                return 4.0
-            elif roa_percentage >= 5:
-                return 3.0
-            elif roa_percentage >= 2:
-                return 2.0
-            else:
-                return 1.0
+#             # Convert ROA to 1-5 scale (ROA benchmarks are lower than ROE)
+#             if roa_percentage >= 15:
+#                 return 5.0
+#             elif roa_percentage >= 10:
+#                 return 4.0
+#             elif roa_percentage >= 5:
+#                 return 3.0
+#             elif roa_percentage >= 2:
+#                 return 2.0
+#             else:
+#                 return 1.0
         
-        # Default if no data
-        return "N/A"
+#         # Default if no data
+#         return "N/A"
         
-    except Exception as e:
-        print(f"Reward potential calculation error: {e}")
-        return "N/A"
+#     except Exception as e:
+#         print(f"Reward potential calculation error: {e}")
+#         return "N/A"
 
-# ========================================
-# HELPER FUNCTION: Get Risk Score (1-5)
-# ========================================
-def get_risk_score(startup):
-    """
-    Converts risk level to numeric score (1-5)
-    - Low Risk = 1/5
-    - Medium Risk = 3/5
-    - High Risk = 5/5
-    """
-    risk_level = calculate_financial_risk(startup)
+# # ========================================
+# # HELPER FUNCTION: Get Risk Score (1-5)
+# # ========================================
+# def get_risk_score(startup):
+#     """
+#     Converts risk level to numeric score (1-5)
+#     - Low Risk = 1/5
+#     - Medium Risk = 3/5
+#     - High Risk = 5/5
+#     """
+#     risk_level = calculate_financial_risk(startup)
     
-    risk_mapping = {
-        'Low': 1,
-        'Medium': 3,
-        'High': 5
-    }
+#     risk_mapping = {
+#         'Low': 1,
+#         'Medium': 3,
+#         'High': 5
+#     }
     
-    return risk_mapping.get(risk_level, 3)
+#     return risk_mapping.get(risk_level, 3)
 
 def sort_startups(startups, sort_by):
     """
@@ -1230,76 +1230,43 @@ class company_profile(APIView):
         startup = get_object_or_404(Startup, id=startup_id)
 
         # Track view if not owner
-        if user != startup.owner:
+        if startup.owner and user != startup.owner.user:  # Fixed: startup.owner is RegisteredUser, not User
             ip_address = request.META.get('HTTP_X_FORWARDED_FOR', '').split(',')[0] or request.META.get('REMOTE_ADDR')
             StartupView.objects.create(user=user, startup=startup, ip_address=ip_address)
 
         is_in_watchlist = Watchlist.objects.filter(user=user, startup=startup).exists()
 
-        # Deck-builder startup
+        # Use serializer for all startups (deck-builder or regular)
+        serializer = StartupSerializer(startup, context={'request': request})
+        startup_data = serializer.data
+        startup_data['is_in_watchlist'] = is_in_watchlist
+
+        # Add deck details if this is a deck-builder startup
         if startup.source_deck:
             deck = startup.source_deck
-            return Response({
-                "startup": {
-                    "id": startup.id,
-                    "company_name": startup.company_name,
-                    "industry": startup.industry,
-                    "is_deck_builder": True
-                },
-                "deck": {
-                    "problem": getattr(deck, 'problem', None),
-                    "solution": getattr(deck, 'solution', None),
-                    "market_analysis": getattr(deck, 'market_analysis', None),
-                    "ask": getattr(deck, 'ask', None),
-                    "team_members": [member.name for member in deck.team_members.all()],
-                    "financials": [
-                        {"year": f.year, "revenue": f.revenue, "profit": f.profit}
-                        for f in deck.financials.order_by('year')
-                    ]
-                },
-                "is_in_watchlist": is_in_watchlist,
-                "show_modal": True,
-                "from_dashboard": True
-            }, status=status.HTTP_200_OK)
+            startup_data['deck'] = {
+                "problem": {"description": deck.problem.description} if hasattr(deck, 'problem') else None,
+                "solution": {"description": deck.solution.description} if hasattr(deck, 'solution') else None,
+                "market_analysis": {
+                    "primary_market": deck.market_analysis.primary_market,
+                    "target_audience": deck.market_analysis.target_audience,
+                    "market_growth_rate": float(deck.market_analysis.market_growth_rate),
+                    "competitive_advantage": deck.market_analysis.competitive_advantage
+                } if hasattr(deck, 'market_analysis') else None,
+                "ask": {
+                    "amount": float(deck.ask.amount),
+                    "usage_description": deck.ask.usage_description
+                } if hasattr(deck, 'ask') else None,
+                "team_members": [{"name": member.name, "title": member.title} for member in deck.team_members.all()],
+                "financials": [
+                    {"year": f.year, "revenue": float(f.revenue), "profit": float(f.profit)}
+                    for f in deck.financials.order_by('year')
+                ]
+            }
+            startup_data['show_modal'] = True
+            startup_data['from_dashboard'] = True
 
-        # Regular startup: calculate risk/reward
-        revenue = float(startup.revenue or 0)
-        net_income = float(startup.net_income or 0)
-        risk_score, reward_score = 2.5, 3.0
-
-        if revenue > 0:
-            margin = net_income / revenue
-            if margin > 0.2:
-                risk_score, reward_score = 2.0, 4.5
-            elif margin > 0.1:
-                risk_score, reward_score = 2.5, 3.5
-            elif margin > 0:
-                risk_score, reward_score = 3.5, 2.5
-            else:
-                risk_score, reward_score = 4.5, 2.0
-
-        confidence_adjustments = {'High': 0.0, 'Medium': 0.0, 'Low': 0.8}
-        confidence = getattr(startup, 'data_source_confidence', 'Medium')
-        risk_score += confidence_adjustments.get(confidence, 0.3)
-        risk_score = min(risk_score, 5.0)
-
-        return Response({
-            "id": startup.id,
-            "company_name": startup.company_name,
-            "industry": startup.industry or "—",
-            "company_description": startup.company_description or "",
-            "revenue": startup.revenue or "N/A",
-            "net_income": startup.net_income or "N/A",
-            "total_assets": getattr(startup, 'total_assets', 'N/A'),
-            "cash_flow": getattr(startup, 'cash_flow', 'N/A'),
-            "team_strength": getattr(startup, 'team_strength', 'No data'),
-            "market_position": getattr(startup, 'market_position', 'No data'),
-            "brand_reputation": getattr(startup, 'brand_reputation', 'No data'),
-            "risk_score": round(risk_score, 1),
-            "reward_score": round(reward_score, 1),
-            "data_source_confidence": getattr(startup, 'data_source_confidence', 'Medium'),
-            "is_in_watchlist": is_in_watchlist
-        }, status=status.HTTP_200_OK)
+        return Response(startup_data, status=status.HTTP_200_OK)
 
 class compare_startups(APIView):
     def get(self, request):
@@ -1344,40 +1311,11 @@ class startup_comparison(APIView):
         if len(startup_ids) < 2 or len(startup_ids) > 3:
             return Response({'error': 'Select 2–3 startups for comparison'}, status=400)
 
+        # Fetch startups
         startups = []
         for sid in startup_ids:
             try:
                 startup = Startup.objects.get(id=sid)
-                startup.projected_return = calculate_projected_return(startup)
-                reward, display_risk, _ = calculate_reward_potential(startup)
-                startup.reward_potential = reward
-
-                # Risk score logic
-                confidence = getattr(startup, 'data_source_confidence', 'Medium')
-                if confidence == 'Low':
-                    risk_score = 2.0
-                else:
-                    risk_score = 2.5
-                    if startup.revenue and startup.net_income:
-                        rev = float(startup.revenue or 0)
-                        income = float(startup.net_income or 0)
-                        if rev > 0:
-                            margin = income / rev
-                            if margin > 0.2:
-                                risk_score = 2.0
-                            elif margin > 0.1:
-                                risk_score = 2.5
-                            elif margin > 0:
-                                risk_score = 3.5
-                            else:
-                                risk_score = 4.5
-                        elif income < 0:
-                            risk_score = 4.5
-
-                startup.risk_score = round(max(min(risk_score, 5.0), 1.0), 1)
-                startup.risk_level = get_risk_level(confidence)
-                startup.risk_color = get_risk_color(confidence)
-
                 startups.append(startup)
             except Startup.DoesNotExist:
                 continue
@@ -1385,7 +1323,7 @@ class startup_comparison(APIView):
         if len(startups) < 2:
             return Response({'error': 'Insufficient startups for comparison'}, status=400)
 
-        # Create comparison session
+        # Create comparison session for tracking
         session_id = str(uuid.uuid4())
         for startup in startups:
             StartupComparison.objects.create(
@@ -1409,24 +1347,21 @@ class startup_comparison(APIView):
             comparison_set = ComparisonSet.objects.create(user=request.user)
             comparison_set.startups.set(startups)
 
-        # Build response with all necessary fields
-        startup_data = [{
-            "id": s.id,
-            "company_name": s.company_name,
-            "industry": s.industry,
-            "tagline": getattr(s, 'tagline', None),
-            "projected_return": s.projected_return,
-            "reward_potential": s.reward_potential,
-            "risk_score": s.risk_score,
-            "risk_level": s.risk_level,
-            "risk_color": s.risk_color,
-            "data_source_confidence": getattr(s, 'data_source_confidence', 'Medium'),
-            "revenue": s.revenue,
-            "net_income": getattr(s, 'net_income', None),
-            "is_deck_builder": getattr(s, 'is_deck_builder', False),
-            "source_deck_id": getattr(s, 'source_deck_id', None),
-            "source_deck": getattr(s, 'source_deck', None),
-        } for s in startups]
+        # Use serializer to get all calculated metrics
+        serializer = StartupSerializer(startups, many=True, context={'request': request})
+        startup_data = serializer.data
+
+        # Add risk color for frontend display
+        for item in startup_data:
+            risk_level = item.get('risk_level')
+            if risk_level == 'Low':
+                item['risk_color'] = 'bg-green-100 text-green-800'
+            elif risk_level == 'Medium':
+                item['risk_color'] = 'bg-yellow-100 text-yellow-800'
+            elif risk_level == 'High':
+                item['risk_color'] = 'bg-red-100 text-red-800'
+            else:
+                item['risk_color'] = 'bg-gray-100 text-gray-800'
 
         return Response({
             "startups": startup_data,
@@ -1508,25 +1443,27 @@ class investment_simulation(APIView):
             return Response({"error": "Invalid investment amount or duration"}, status=400)
 
         selected_startup = None
+        growth_rate = 0.07  # Default 7%
+        risk_level = "Medium"
+
         if startup_id:
             selected_startup = get_object_or_404(Startup, id=startup_id)
+            
+            # Use serializer to get calculated projected_return
+            serializer = StartupSerializer(selected_startup, context={'request': request})
+            startup_data = serializer.data
+            
+            # projected_return is already CAGR with risk adjustment from serializer
+            projected_return = startup_data.get('projected_return', 7)
+            growth_rate = projected_return / 100
+            risk_level = startup_data.get('risk_level', 'Medium')
 
-        # Use the projected_return directly (which is already CAGR with risk adjustment)
-        if selected_startup:
-            # projected_return is already calculated using CAGR with risk adjustment
-            # from calculate_projected_return() function
-            growth_rate = (selected_startup.projected_return or 7) / 100
-            risk_level = selected_startup.risk_level or "Medium"
-        else:
-            growth_rate = 0.07
-            risk_level = "Medium"
-
-        # Canonical CAGR compound formula
+        # Calculate future value using compound interest formula
         final_value = investment_amount * (1 + growth_rate) ** duration_years
         total_gain = final_value - investment_amount
         roi_percentage = (total_gain / investment_amount) * 100
 
-        # Yearly breakdown (compound)
+        # Yearly breakdown
         yearly_breakdown = []
         current_value = investment_amount
         for year in range(1, duration_years + 1):
@@ -1540,22 +1477,22 @@ class investment_simulation(APIView):
             })
             current_value = ending
 
-        # Chart data for plotting
+        # Chart data
         chart_data = [{"year": 0, "value": round(investment_amount, 2)}]
         temp_value = investment_amount
         for year in range(1, duration_years + 1):
             temp_value *= (1 + growth_rate)
             chart_data.append({"year": year, "value": round(temp_value, 2)})
 
+        # Risk color mapping
         risk_colors = {
             "Low": "bg-green-100 text-green-800",
             "Medium": "bg-yellow-100 text-yellow-800",
             "High": "bg-red-100 text-red-800",
         }
+        risk_color = risk_colors.get(risk_level, "bg-gray-100 text-gray-800")
 
-        risk_color = risk_colors.get(risk_level if selected_startup else "Medium", "bg-gray-100 text-gray-800")
-
-        return Response({
+        response_data = {
             "simulation_run": True,
             "investment_amount": round(investment_amount, 2),
             "duration_years": duration_years,
@@ -1567,15 +1504,19 @@ class investment_simulation(APIView):
             "chart_data": chart_data,
             "risk_level": f"{risk_level} Risk" if selected_startup else "Medium Risk",
             "risk_color": risk_color,
-            "calculation_method": "Revenue CAGR with Risk Adjustment",
-            "startup": {
+            "calculation_method": "Revenue CAGR with Risk Adjustment"
+        }
+
+        if selected_startup:
+            response_data["startup"] = {
                 "id": selected_startup.id,
                 "name": selected_startup.company_name,
                 "industry": selected_startup.industry,
-                "projected_return": selected_startup.projected_return,
-                "risk_level": selected_startup.risk_level,
-            } if selected_startup else None,
-        })
+                "projected_return": startup_data.get('projected_return'),
+                "risk_level": risk_level,
+            }
+
+        return Response(response_data)
 
 #TODO: UPDATE
 class calculate_investment_api(APIView):

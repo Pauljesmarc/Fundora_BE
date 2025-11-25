@@ -96,11 +96,11 @@ urlpatterns = [
     path('investor/comparisons/delete/<int:comparison_id>/', views.DeleteComparisonSetView.as_view(), name='delete_comparison_set'),
     
     # Profile endpoints
-    path('api/profile/', views.ProfileView.as_view(), name='profile'),
-    path('api/profile/update/', views.UpdateProfileView.as_view(), name='update-profile'),
+    path('profile/', views.ProfileView.as_view(), name='profile'),
+    path('profile/update/', views.UpdateProfileView.as_view(), name='update-profile'),
 
     # Startup Profile
-    path('api/startup/profile/', views.StartupProfileAccountView.as_view(), name='startup-profile-account'),
+    path('startup/profile/', views.StartupProfileAccountView.as_view(), name='startup-profile-account'),
 
     path('test/', TestAPI.as_view(), name='test-api'),
 ]

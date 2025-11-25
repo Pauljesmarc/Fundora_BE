@@ -120,6 +120,48 @@ class Startup(models.Model):
     total_liabilities = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)
     shareholder_equity = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)
     cash_flow = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)
+
+    # For CAGR Calculation (Projected Return)
+    time_between_periods = models.DecimalField(
+        max_digits=5, 
+        decimal_places=2, 
+        null=True, 
+        blank=True,
+        help_text="Number of years between previous and current revenue (e.g., 1.0 for annual)"
+    )
+    
+    # For Altman Z-Score (Risk Level)
+    retained_earnings = models.DecimalField(
+        max_digits=15, 
+        decimal_places=2, 
+        null=True, 
+        blank=True,
+        help_text="Accumulated retained earnings from prior periods"
+    )
+    
+    ebit = models.DecimalField(
+        max_digits=15, 
+        decimal_places=2, 
+        null=True, 
+        blank=True,
+        help_text="Earnings Before Interest and Taxes"
+    )
+    
+    current_assets = models.DecimalField(
+        max_digits=15, 
+        decimal_places=2, 
+        null=True, 
+        blank=True,
+        help_text="Assets that can be converted to cash within one year"
+    )
+    
+    current_liabilities = models.DecimalField(
+        max_digits=15, 
+        decimal_places=2, 
+        null=True, 
+        blank=True,
+        help_text="Debts due within one year"
+    )
     
     # Additional Financial Data
     current_revenue = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)

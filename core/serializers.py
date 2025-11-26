@@ -135,7 +135,7 @@ class StartupSerializer(serializers.ModelSerializer):
             'brand_reputation',
             'confidence_percentage',
             'reward_potential',
-            'estimated_growth_rate'
+            'estimated_growth_rate',
             'projected_return',
             'risk_level',
             'risk_score',

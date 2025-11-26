@@ -135,19 +135,21 @@ WSGI_APPLICATION = 'fundora_backend.wsgi.application'
 #     }
 # }
 
+# Database
 DATABASES = {
     'default': dj_database_url.config(
         default='sqlite:///db.sqlite3',
-        conn_max_age=600,
-        ssl_require=True
+        conn_max_age=600
     )
 }
 
-# SSL configuration for PostgreSQL on Render
+# SSL configuration ONLY for PostgreSQL (when DATABASE_URL is set)
 if 'DATABASE_URL' in os.environ:
-    DATABASES['default']['OPTIONS'] = {
-        'sslmode': 'require',
-    }
+    db_url = os.environ.get('DATABASE_URL', '')
+    if 'postgres' in db_url:
+        DATABASES['default']['OPTIONS'] = {
+            'sslmode': 'require',
+        }
 
 SECRET_KEY = config("SECRET_KEY")
 DEBUG = config("DEBUG", default=False, cast=bool)

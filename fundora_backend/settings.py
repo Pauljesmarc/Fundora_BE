@@ -136,7 +136,10 @@ WSGI_APPLICATION = 'fundora_backend.wsgi.application'
 # }
 
 DATABASES = {
-    'default': dj_database_url.parse(config("DATABASE_URL"))
+    'default': dj_database_url.config(
+        default='sqlite:///db.sqlite3',
+        conn_max_age=600
+    )
 }
 
 SECRET_KEY = config("SECRET_KEY")

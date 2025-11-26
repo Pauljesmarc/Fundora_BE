@@ -1,3 +1,4 @@
+import math
 from rest_framework import serializers
 from .models import RegisteredUser, Deck, Startup, Problem, Solution, MarketAnalysis, FundingAsk, TeamMember, FinancialProjection, Watchlist
 from django.utils.translation import gettext_lazy as _
@@ -6,6 +7,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.hashers import check_password
 from django.contrib.auth.models import User
 from django.contrib.auth import authenticate
+
 
 User = get_user_model()
 

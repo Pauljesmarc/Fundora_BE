@@ -328,33 +328,46 @@ class StartupSerializer(serializers.ModelSerializer):
         
     def get_projected_return(self, obj):
         """
-        Calculate projected return as RAW CAGR (Future Value calculation)
-        
-        Formula: CAGR = [(Current Revenue / Prior Revenue)^(1/Years) - 1] × 100
-        
-        Returns: Float percentage or None if insufficient data
+        Calculate projected return as RAW CAGR
+        For regular startups: Use current_revenue and previous_revenue
+        For pitch decks: Use financial projections (earliest to latest year)
         """
         try:
+            if obj.source_deck:
+                financials = obj.source_deck.financials.all().order_by('year')
+                
+                if financials.count() >= 2:
+                    earliest = financials.first()
+                    latest = financials.last()
+                    
+                    earliest_revenue = float(earliest.revenue)
+                    latest_revenue = float(latest.revenue)
+                    number_of_years = latest.year - earliest.year
+                    
+                    if earliest_revenue > 0 and latest_revenue > 0 and number_of_years > 0:
+                        # CAGR = [(Latest / Earliest)^(1/years) - 1] × 100
+                        cagr = (math.pow(latest_revenue / earliest_revenue, 1 / number_of_years) - 1) * 100
+                        return round(max(min(cagr, 200), -100), 2)
+                
+                return None
+            
+            # Regular startup calculation (existing code)
             current_revenue = float(obj.revenue or getattr(obj, 'current_revenue', 0) or 0)
             previous_revenue = float(getattr(obj, 'previous_revenue', 0) or 0)
             time_between_periods = float(getattr(obj, 'time_between_periods', 1) or 1)
             
-            # Validate data availability
             if current_revenue <= 0 or previous_revenue <= 0 or time_between_periods <= 0:
-                return None  # No default - return None if no data
+                return None
             
-            # Calculate RAW CAGR (no risk adjustment)
             revenue_ratio = current_revenue / previous_revenue
             cagr = (math.pow(revenue_ratio, 1 / time_between_periods) - 1) * 100
-            
-            # Cap CAGR at reasonable limits
             cagr = max(min(cagr, 200), -100)
             
             return round(cagr, 2)
             
         except Exception as e:
             print(f"Projected return calculation error: {e}")
-            return None  # Return None on error, not a default number
+            return None
 
     def get_estimated_growth_rate(self, obj):
         """Alias for projected_return to maintain backward compatibility"""

@@ -1896,22 +1896,33 @@ def add_startup(request):
             'error': 'User profile not found'
         }, status=status.HTTP_404_NOT_FOUND)
 
-    # Prepare data for serializer - add the owner
+    # Prepare data for serializer
     startup_data = request.data.copy()
     
     # Create serializer instance with the data
-    serializer = StartupSerializer(data=startup_data)
+    serializer = StartupSerializer(data=startup_data, context={'request': request})
     
     if serializer.is_valid():
-        # Save the startup with the owner (not included in serializer)
-        startup = serializer.save(owner=registered_user)
-        
-        return Response({
-            'success': True,
-            'message': 'Startup added successfully!',
-            'startup_id': startup.id,
-            'data': StartupSerializer(startup).data
-        }, status=status.HTTP_201_CREATED)
+        try:
+            # Save the startup with the owner (passed as kwarg, not in data)
+            startup = serializer.save(owner=registered_user)
+            
+            return Response({
+                'success': True,
+                'message': 'Startup added successfully!',
+                'startup_id': startup.id,
+                'data': StartupSerializer(startup, context={'request': request}).data
+            }, status=status.HTTP_201_CREATED)
+        except Exception as e:
+            # Log the actual error for debugging
+            import traceback
+            print(f"Error saving startup: {e}")
+            traceback.print_exc()
+            
+            return Response({
+                'success': False,
+                'error': f'Failed to save startup: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     else:
         # Return validation errors
         return Response({

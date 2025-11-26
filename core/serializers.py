@@ -152,6 +152,14 @@ class StartupSerializer(serializers.ModelSerializer):
             'current_assets',
             'current_liabilities',
         ]
+        read_only_fields = ['id', 'created_at', 'updated_at', 'owner_email', 'source_deck_id']
+
+    def create(self, validated_data):
+        """
+        Override create to handle owner properly
+        Owner should be passed via save(owner=...) not in validated_data
+        """
+        return super().create(validated_data)
 
     def get_tagline(self, obj):
         """Get tagline from source deck if this is a deck builder startup"""
@@ -288,7 +296,7 @@ class StartupSerializer(serializers.ModelSerializer):
                 if roe_percentage >= 20:
                     return 5.0  # Excellent
                 elif roe_percentage >= 15:
-                    return 4.0  # Good ← Your 18.75% should hit here
+                    return 4.0  # Good
                 elif roe_percentage >= 10:
                     return 3.0  # Average
                 elif roe_percentage >= 5:
@@ -347,6 +355,10 @@ class StartupSerializer(serializers.ModelSerializer):
         except Exception as e:
             print(f"Projected return calculation error: {e}")
             return None  # Return None on error, not a default number
+
+    def get_estimated_growth_rate(self, obj):
+        """Alias for projected_return to maintain backward compatibility"""
+        return self.get_projected_return(obj)
     
     def get_is_in_watchlist(self, obj):
         """Check if the startup is in the current user's watchlist"""
@@ -411,6 +423,7 @@ class DeckDetailSerializer(serializers.ModelSerializer):
             'id', 'company_name', 'tagline', 'logo',
             'team_members', 'financials', 'ask', 'problem', 'solution', 'market_analysis','created_at'
         ]
+
 class DeckReportSerializer(serializers.ModelSerializer):
     problem = serializers.SerializerMethodField()
     solution = serializers.SerializerMethodField()

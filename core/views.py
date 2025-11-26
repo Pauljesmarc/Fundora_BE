@@ -1443,22 +1443,45 @@ class investment_simulation(APIView):
             return Response({"error": "Invalid investment amount or duration"}, status=400)
 
         selected_startup = None
-        growth_rate = 0.07  # Default 7%
-        risk_level = "Medium"
+        growth_rate = None
+        risk_level = None
 
         if startup_id:
             selected_startup = get_object_or_404(Startup, id=startup_id)
             
-            # Use serializer to get calculated projected_return
             serializer = StartupSerializer(selected_startup, context={'request': request})
             startup_data = serializer.data
             
-            # projected_return is already CAGR with risk adjustment from serializer
-            projected_return = startup_data.get('projected_return', 7)
-            growth_rate = projected_return / 100
-            risk_level = startup_data.get('risk_level', 'Medium')
+            projected_return = startup_data.get('projected_return')
+            risk_level = startup_data.get('risk_level')
+            
+            if projected_return is not None and risk_level is not None:
+                risk_adjustments = {
+                    'Very Low': 1.00,
+                    'Low': 0.95,
+                    'Medium': 0.85,
+                    'High': 0.75,
+                    'Very High': 0.65
+                }
+                
+                adjustment_factor = risk_adjustments.get(risk_level, 0.85)
+                adjusted_return = projected_return * adjustment_factor
+                growth_rate = adjusted_return / 100
+            else:
+                return Response({
+                    "error": "Insufficient financial data to run simulation",
+                    "detail": "This startup does not have complete revenue history required for projection",
+                    "missing": {
+                        "has_projected_return": projected_return is not None,
+                        "has_risk_level": risk_level is not None
+                    }
+                }, status=400)
+        else:
+            return Response({
+                "error": "No startup selected",
+                "detail": "Please select a startup to run investment simulation"
+            }, status=400)
 
-        # Calculate future value using compound interest formula
         final_value = investment_amount * (1 + growth_rate) ** duration_years
         total_gain = final_value - investment_amount
         roi_percentage = (total_gain / investment_amount) * 100
@@ -1486,9 +1509,11 @@ class investment_simulation(APIView):
 
         # Risk color mapping
         risk_colors = {
+            "Very Low": "bg-green-100 text-green-800",
             "Low": "bg-green-100 text-green-800",
             "Medium": "bg-yellow-100 text-yellow-800",
             "High": "bg-red-100 text-red-800",
+            "Very High": "bg-red-100 text-red-800",
         }
         risk_color = risk_colors.get(risk_level, "bg-gray-100 text-gray-800")
 
@@ -1497,24 +1522,25 @@ class investment_simulation(APIView):
             "investment_amount": round(investment_amount, 2),
             "duration_years": duration_years,
             "growth_rate": round(growth_rate * 100, 2),
+            "unadjusted_growth_rate": round(projected_return, 2),
+            "risk_adjustment_applied": True,
             "final_value": round(final_value, 2),
             "total_gain": round(total_gain, 2),
             "roi_percentage": round(roi_percentage, 2),
             "yearly_breakdown": yearly_breakdown,
             "chart_data": chart_data,
-            "risk_level": f"{risk_level} Risk" if selected_startup else "Medium Risk",
+            "risk_level": f"{risk_level} Risk",
             "risk_color": risk_color,
             "calculation_method": "Revenue CAGR with Risk Adjustment"
         }
 
-        if selected_startup:
-            response_data["startup"] = {
-                "id": selected_startup.id,
-                "name": selected_startup.company_name,
-                "industry": selected_startup.industry,
-                "projected_return": startup_data.get('projected_return'),
-                "risk_level": risk_level,
-            }
+        response_data["startup"] = {
+            "id": selected_startup.id,
+            "name": selected_startup.company_name,
+            "industry": selected_startup.industry,
+            "projected_return": projected_return,
+            "risk_level": risk_level,
+        }
 
         return Response(response_data)
 

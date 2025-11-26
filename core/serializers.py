@@ -95,9 +95,11 @@ class StartupSerializer(serializers.ModelSerializer):
     owner_email = serializers.EmailField(source='owner.user.email', read_only=True)
     source_deck_id = serializers.IntegerField(source='source_deck.id', read_only=True)
 
+    risk_level = serializers.SerializerMethodField()
+    risk_score = serializers.SerializerMethodField()
     reward_potential = serializers.SerializerMethodField()
     projected_return = serializers.SerializerMethodField()
-    risk_level = serializers.SerializerMethodField()
+    estimated_growth_rate = serializers.SerializerMethodField()
     display_industry = serializers.SerializerMethodField()
     is_in_watchlist = serializers.SerializerMethodField()
     tagline = serializers.SerializerMethodField()
@@ -133,8 +135,10 @@ class StartupSerializer(serializers.ModelSerializer):
             'brand_reputation',
             'confidence_percentage',
             'reward_potential',
+            'estimated_growth_rate'
             'projected_return',
             'risk_level',
+            'risk_score',
             'owner_email',
             'created_at',
             'updated_at',
@@ -185,6 +189,81 @@ class StartupSerializer(serializers.ModelSerializer):
             return None
         
         return None
+
+    def get_risk_level(self, obj):
+        """
+        Uses Original Altman Z-Score with 5-level risk assessment
+        Z = 1.2A + 1.4B + 3.3C + 0.6D + 1.0E
+        
+        Risk Levels (1-5):
+        - Z > 3.0:  Very Low Risk (1/5)
+        - 2.6-3.0:  Low Risk (2/5)
+        - 1.8-2.6:  Medium Risk (3/5)
+        - 1.1-1.8:  High Risk (4/5)
+        - Z < 1.1:  Very High Risk (5/5)
+        """
+        try:
+            total_assets = float(obj.total_assets or 0)
+            total_liabilities = float(obj.total_liabilities or 0)
+            shareholder_equity = float(obj.shareholder_equity or 0)
+            retained_earnings = float(getattr(obj, 'retained_earnings', 0) or 0)
+            ebit = float(getattr(obj, 'ebit', 0) or 0)
+            current_assets = float(getattr(obj, 'current_assets', 0) or 0)
+            current_liabilities = float(getattr(obj, 'current_liabilities', 0) or 0)
+            revenue = float(obj.revenue or getattr(obj, 'current_revenue', 0) or 0)
+            
+            if total_assets <= 0:
+                return None
+            
+            working_capital = current_assets - current_liabilities
+            
+            A = working_capital / total_assets
+            B = retained_earnings / total_assets
+            C = ebit / total_assets
+            D = shareholder_equity / total_liabilities if total_liabilities > 0 else 1.0
+            E = revenue / total_assets
+            
+            z_score = (1.2 * A) + (1.4 * B) + (3.3 * C) + (0.6 * D) + (1.0 * E)
+            
+            if z_score > 3.0:
+                return 'Very Low'
+            elif z_score > 2.6:
+                return 'Low'
+            elif z_score > 1.8:
+                return 'Medium'
+            elif z_score > 1.1:
+                return 'High'
+            else:
+                return 'Very High'
+                
+        except Exception as e:
+            print(f"Risk calculation error: {e}")
+            return None
+        
+    def get_risk_score(self, obj):
+        """
+        Convert risk level to numeric score (1-5)
+        - Very Low = 1/5
+        - Low = 2/5
+        - Medium = 3/5
+        - High = 4/5
+        - Very High = 5/5
+        - None = None (no default number)
+        """
+        risk_level = self.get_risk_level(obj)
+        
+        if risk_level is None:
+            return None
+        
+        risk_mapping = {
+            'Very Low': 1,
+            'Low': 2,
+            'Medium': 3,
+            'High': 4,
+            'Very High': 5
+        }
+        
+        return risk_mapping.get(risk_level, None)
 
     def get_reward_potential(self, obj):
         """
@@ -238,11 +317,14 @@ class StartupSerializer(serializers.ModelSerializer):
         except Exception as e:
             print(f"Reward potential calculation error: {e}")
             return "N/A"
-
+        
     def get_projected_return(self, obj):
         """
-        Calculate projected return using Revenue CAGR with risk adjustment
-        Matches calculate_projected_return() function in views.py
+        Calculate projected return as RAW CAGR (Future Value calculation)
+        
+        Formula: CAGR = [(Current Revenue / Prior Revenue)^(1/Years) - 1] × 100
+        
+        Returns: Float percentage or None if insufficient data
         """
         try:
             current_revenue = float(obj.revenue or getattr(obj, 'current_revenue', 0) or 0)
@@ -251,85 +333,20 @@ class StartupSerializer(serializers.ModelSerializer):
             
             # Validate data availability
             if current_revenue <= 0 or previous_revenue <= 0 or time_between_periods <= 0:
-                # Fallback to simple profit margin if no revenue growth data
-                net_income = float(obj.net_income or 0)
-                if current_revenue > 0:
-                    profit_margin = (net_income / current_revenue) * 100
-                    return round(max(profit_margin, 0), 2)
-                return 0.0
+                return None  # No default - return None if no data
             
-            # Step 1: Calculate CAGR
+            # Calculate RAW CAGR (no risk adjustment)
             revenue_ratio = current_revenue / previous_revenue
             cagr = (math.pow(revenue_ratio, 1 / time_between_periods) - 1) * 100
             
             # Cap CAGR at reasonable limits
-            cagr = max(min(cagr, 100), -50)
+            cagr = max(min(cagr, 200), -100)
             
-            # Step 2: Get Risk Level and Apply Adjustment Factor
-            risk_level = self.get_risk_level(obj)
-            
-            if risk_level == 'Low':
-                adjustment_factor = 1.00  # Aggressive
-            elif risk_level == 'Medium':
-                adjustment_factor = 0.85  # Moderate
-            else:  # High risk or None
-                adjustment_factor = 0.70  # Conservative
-            
-            # Step 3: Calculate Risk-Adjusted Projected Return
-            projected_return = cagr * adjustment_factor
-            
-            return round(projected_return, 2)
+            return round(cagr, 2)
             
         except Exception as e:
             print(f"Projected return calculation error: {e}")
-            return 0.0
-    
-    def get_risk_level(self, obj):
-        """
-        Uses Original Altman Z-Score for comprehensive risk assessment
-        Z = 1.2A + 1.4B + 3.3C + 0.6D + 1.0E
-        Matches calculate_financial_risk() function in views.py
-        
-        Returns: 'Low', 'Medium', 'High', 'No Data', or 'Error'
-        """
-        try:
-            total_assets = float(obj.total_assets or 0)
-            total_liabilities = float(obj.total_liabilities or 0)
-            shareholder_equity = float(obj.shareholder_equity or 0)
-            retained_earnings = float(getattr(obj, 'retained_earnings', 0) or 0)
-            ebit = float(getattr(obj, 'ebit', 0) or 0)
-            current_assets = float(getattr(obj, 'current_assets', 0) or 0)
-            current_liabilities = float(getattr(obj, 'current_liabilities', 0) or 0)
-            revenue = float(obj.revenue or getattr(obj, 'current_revenue', 0) or 0)
-            
-            # Validate minimum data requirements
-            if total_assets <= 0:
-                return 'No Data'
-            
-            # Calculate Working Capital
-            working_capital = current_assets - current_liabilities
-            
-            # Calculate Z-Score components
-            A = working_capital / total_assets
-            B = retained_earnings / total_assets
-            C = ebit / total_assets
-            D = shareholder_equity / total_liabilities if total_liabilities > 0 else 1.0
-            E = revenue / total_assets
-            
-            # Calculate Altman Z-Score
-            z_score = (1.2 * A) + (1.4 * B) + (3.3 * C) + (0.6 * D) + (1.0 * E)
-            
-            # Interpret Z-Score
-            if z_score > 2.99:
-                return 'Low'      # Safe Zone
-            elif z_score > 1.81:
-                return 'Medium'   # Grey Zone ← Your 1.93 should be here
-            else:
-                return 'High'     # Distress Zone
-                
-        except Exception as e:
-            print(f"Risk calculation error: {e}")
-            return 'Error'
+            return None  # Return None on error, not a default number
     
     def get_is_in_watchlist(self, obj):
         """Check if the startup is in the current user's watchlist"""

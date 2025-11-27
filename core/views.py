@@ -1419,13 +1419,6 @@ def get_risk_color(confidence):
     else:
         return 'bg-red-100 text-red-800'
 
-'''/* TODO: 
-    USE FUTURE VALUE TO CALCULATE THE SIMULATION
-    1. CALCULATE CAGR
-    2. ASSESS RISK SCORE
-    3. APPLY RISK ADJUSTMENT FACTOR
-    4. CALCULATE FV
-*/'''
 class investment_simulation(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -1443,7 +1436,7 @@ class investment_simulation(APIView):
             return Response({"error": "Invalid investment amount or duration"}, status=400)
 
         selected_startup = None
-        growth_rate = None
+        projected_return = None
         risk_level = None
 
         if startup_id:
@@ -1452,27 +1445,16 @@ class investment_simulation(APIView):
             serializer = StartupSerializer(selected_startup, context={'request': request})
             startup_data = serializer.data
             
+            # Get IRR-based projected return (already risk-adjusted in serializer)
             projected_return = startup_data.get('projected_return')
             risk_level = startup_data.get('risk_level')
             
-            if projected_return is not None and risk_level is not None:
-                risk_adjustments = {
-                    'Very Low': 1.00,
-                    'Low': 0.95,
-                    'Medium': 0.85,
-                    'High': 0.75,
-                    'Very High': 0.65
-                }
-                
-                adjustment_factor = risk_adjustments.get(risk_level, 0.85)
-                adjusted_return = projected_return * adjustment_factor
-                growth_rate = adjusted_return / 100
-            else:
+            if projected_return is None:
                 return Response({
                     "error": "Insufficient financial data to run simulation",
                     "detail": "This startup does not have complete revenue history required for projection",
                     "missing": {
-                        "has_projected_return": projected_return is not None,
+                        "has_projected_return": False,
                         "has_risk_level": risk_level is not None
                     }
                 }, status=400)
@@ -1482,7 +1464,13 @@ class investment_simulation(APIView):
                 "detail": "Please select a startup to run investment simulation"
             }, status=400)
 
-        final_value = investment_amount * (1 + growth_rate) ** duration_years
+        # Calculate using DCF/IRR approach with risk adjustment
+        # Projected Return already includes risk adjustment from serializer
+        # Final Future Value = Investment Amount × (1 + Risk-Adjusted Return)^years
+        
+        growth_rate = projected_return / 100  # Convert percentage to decimal
+        
+        final_value = investment_amount * math.pow(1 + growth_rate, duration_years)
         total_gain = final_value - investment_amount
         roi_percentage = (total_gain / investment_amount) * 100
 
@@ -1507,6 +1495,16 @@ class investment_simulation(APIView):
             temp_value *= (1 + growth_rate)
             chart_data.append({"year": year, "value": round(temp_value, 2)})
 
+        # Get risk multiplier for display
+        risk_multipliers = {
+            'Very Low': 1.00,
+            'Low': 1.00,
+            'Medium': 0.75,
+            'High': 0.50,
+            'Very High': 0.50
+        }
+        risk_multiplier = risk_multipliers.get(risk_level, 0.75) if risk_level else 0.75
+
         # Risk color mapping
         risk_colors = {
             "Very Low": "bg-green-100 text-green-800",
@@ -1515,23 +1513,23 @@ class investment_simulation(APIView):
             "High": "bg-red-100 text-red-800",
             "Very High": "bg-red-100 text-red-800",
         }
-        risk_color = risk_colors.get(risk_level, "bg-gray-100 text-gray-800")
+        risk_color = risk_colors.get(risk_level, "bg-gray-100 text-gray-800") if risk_level else "bg-gray-100 text-gray-800"
 
         response_data = {
             "simulation_run": True,
             "investment_amount": round(investment_amount, 2),
             "duration_years": duration_years,
-            "growth_rate": round(growth_rate * 100, 2),
-            "unadjusted_growth_rate": round(projected_return, 2),
+            "risk_adjusted_growth_rate": round(growth_rate * 100, 2),
+            "risk_multiplier": risk_multiplier,
             "risk_adjustment_applied": True,
             "final_value": round(final_value, 2),
             "total_gain": round(total_gain, 2),
             "roi_percentage": round(roi_percentage, 2),
             "yearly_breakdown": yearly_breakdown,
             "chart_data": chart_data,
-            "risk_level": f"{risk_level} Risk",
+            "risk_level": f"{risk_level} Risk" if risk_level else "Unknown Risk",
             "risk_color": risk_color,
-            "calculation_method": "Revenue CAGR with Risk Adjustment"
+            "calculation_method": "IRR with Risk Adjustment (DCF-based)"
         }
 
         response_data["startup"] = {

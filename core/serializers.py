@@ -272,6 +272,24 @@ class StartupSerializer(serializers.ModelSerializer):
         }
         
         return risk_mapping.get(risk_level, None)
+    
+    def _get_risk_multiplier(self, risk_level):
+        """
+        Get risk multiplier based on risk level
+        High Risk = 0.50, Medium Risk = 0.75, Low Risk = 1.00
+        """
+        if risk_level is None:
+            return 0.75  # Default to medium risk
+        
+        risk_multipliers = {
+            'Very Low': 1.00,
+            'Low': 1.00,
+            'Medium': 0.75,
+            'High': 0.50,
+            'Very High': 0.50
+        }
+        
+        return risk_multipliers.get(risk_level, 0.75)
 
     def get_reward_potential(self, obj):
         """
@@ -328,9 +346,70 @@ class StartupSerializer(serializers.ModelSerializer):
         
     def get_projected_return(self, obj):
         """
-        Calculate projected return as RAW CAGR
-        For regular startups: Use current_revenue and previous_revenue
-        For pitch decks: Use financial projections (earliest to latest year)
+        Calculate Projected Return using IRR-based approach
+        IRR = (Expected Future Valuation / Current Valuation)^(1/years) - 1
+        
+        Uses revenue as proxy for valuation
+        For pitch decks: Uses financial projections
+        For regular startups: Uses revenue history
+        Applies risk adjustment based on risk level
+        """
+        try:
+            if obj.source_deck:
+                financials = obj.source_deck.financials.all().order_by('year')
+                
+                if financials.count() >= 2:
+                    earliest = financials.first()
+                    latest = financials.last()
+                    
+                    current_valuation = float(earliest.revenue)
+                    future_valuation = float(latest.revenue)
+                    years = latest.year - earliest.year
+                    
+                    if current_valuation > 0 and future_valuation > 0 and years > 0:
+                        # IRR = (Future / Current)^(1/years) - 1
+                        irr = (math.pow(future_valuation / current_valuation, 1 / years) - 1) * 100
+                        
+                        # Apply risk adjustment
+                        risk_level = self.get_risk_level(obj)
+                        risk_multiplier = self._get_risk_multiplier(risk_level)
+                        
+                        # Risk-Adjusted Return = IRR × Risk Multiplier
+                        adjusted_return = irr * risk_multiplier
+                        
+                        return round(max(min(adjusted_return, 200), -100), 2)
+                
+                return None
+            
+            # Regular startup calculation
+            current_valuation = float(getattr(obj, 'previous_revenue', 0) or 0)
+            future_valuation = float(obj.revenue or getattr(obj, 'current_revenue', 0) or 0)
+            years = float(getattr(obj, 'time_between_periods', 1) or 1)
+            
+            if current_valuation <= 0 or future_valuation <= 0 or years <= 0:
+                return None
+            
+            # IRR = (Future / Current)^(1/years) - 1
+            irr = (math.pow(future_valuation / current_valuation, 1 / years) - 1) * 100
+            
+            # Apply risk adjustment
+            risk_level = self.get_risk_level(obj)
+            risk_multiplier = self._get_risk_multiplier(risk_level)
+            
+            # Risk-Adjusted Return = IRR × Risk Multiplier
+            adjusted_return = irr * risk_multiplier
+            
+            return round(max(min(adjusted_return, 200), -100), 2)
+            
+        except Exception as e:
+            print(f"Projected return calculation error: {e}")
+            return None
+
+    def get_estimated_growth_rate(self, obj):
+        """
+        Calculate Estimated Growth Rate using CAGR formula
+        CAGR = (Current Revenue / Prior Revenue)^(1/years) - 1
+        Returns as percentage
         """
         try:
             if obj.source_deck:
@@ -351,7 +430,7 @@ class StartupSerializer(serializers.ModelSerializer):
                 
                 return None
             
-            # Regular startup calculation (existing code)
+            # Regular startup calculation
             current_revenue = float(obj.revenue or getattr(obj, 'current_revenue', 0) or 0)
             previous_revenue = float(getattr(obj, 'previous_revenue', 0) or 0)
             time_between_periods = float(getattr(obj, 'time_between_periods', 1) or 1)
@@ -359,6 +438,7 @@ class StartupSerializer(serializers.ModelSerializer):
             if current_revenue <= 0 or previous_revenue <= 0 or time_between_periods <= 0:
                 return None
             
+            # CAGR = (Current / Prior)^(1/years) - 1
             revenue_ratio = current_revenue / previous_revenue
             cagr = (math.pow(revenue_ratio, 1 / time_between_periods) - 1) * 100
             cagr = max(min(cagr, 200), -100)
@@ -366,12 +446,8 @@ class StartupSerializer(serializers.ModelSerializer):
             return round(cagr, 2)
             
         except Exception as e:
-            print(f"Projected return calculation error: {e}")
+            print(f"Estimated growth rate calculation error: {e}")
             return None
-
-    def get_estimated_growth_rate(self, obj):
-        """Alias for projected_return to maintain backward compatibility"""
-        return self.get_projected_return(obj)
     
     def get_is_in_watchlist(self, obj):
         """Check if the startup is in the current user's watchlist"""

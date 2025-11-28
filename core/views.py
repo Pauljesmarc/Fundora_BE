@@ -451,6 +451,10 @@ def sort_startups(startups, sort_by):
     return startups
 
 class StartupListView(ListAPIView):
+    """
+    API endpoint to list startups with filtering and sorting.
+    Uses existing StartupSerializer which calculates metrics on-the-fly.
+    """
     serializer_class = StartupSerializer
     
     def get_serializer_context(self):
@@ -489,9 +493,9 @@ class StartupListView(ListAPIView):
         if industry:
             qs = qs.filter(industry__iexact=industry)
 
-        # Minimum growth rate filter - applied post-serialization (CHANGED FROM min_return)
-        min_growth_rate = params.get('min_growth_rate')
-        self._min_growth_rate_filter = float(min_growth_rate) if min_growth_rate else None
+        # Minimum return filter - applied post-serialization
+        min_return = params.get('min_return')
+        self._min_return_filter = float(min_return) if min_return else None
 
         # Risk level filter (Low/Medium/High) - applied post-serialization
         risk_level = params.get('risk_level')
@@ -565,12 +569,12 @@ class StartupListView(ListAPIView):
                 data = [item for item in data if item.get('risk_level') in ['Low', 'Medium']]
             # else: Aggressive: show all risk levels (including pitch decks)
         
-        # CHANGED: Apply min_growth_rate filter instead of min_return (post-serialization)
-        if hasattr(self, '_min_growth_rate_filter') and self._min_growth_rate_filter is not None:
+        # Apply min_return filter (post-serialization)
+        if hasattr(self, '_min_return_filter') and self._min_return_filter is not None:
             data = [
                 item for item in data 
-                if item.get('estimated_growth_rate') is not None 
-                and item.get('estimated_growth_rate') >= self._min_growth_rate_filter
+                if item.get('projected_return') is not None 
+                and item.get('projected_return') >= self._min_return_filter
             ]
         
         # Apply funding ask range filter for pitch decks
@@ -607,11 +611,10 @@ class StartupListView(ListAPIView):
         
         # Apply sorting that requires calculated fields
         sort_by = getattr(self, '_sort_by', None)
-        # CHANGED: Sort by growth_rate instead of projected_return
-        if sort_by == 'growth_rate_desc':
-            data = sorted(data, key=lambda x: x.get('estimated_growth_rate') or -999999, reverse=True)
-        elif sort_by == 'growth_rate_asc':
-            data = sorted(data, key=lambda x: x.get('estimated_growth_rate') or 999999)
+        if sort_by == 'projected_return_desc':
+            data = sorted(data, key=lambda x: x.get('projected_return') or -999999, reverse=True)
+        elif sort_by == 'projected_return_asc':
+            data = sorted(data, key=lambda x: x.get('projected_return') or 999999)
         elif sort_by == 'reward_potential_desc':
             data = sorted(data, key=lambda x: x.get('reward_potential') or 0, reverse=True)
         elif sort_by == 'risk_asc':

@@ -298,6 +298,7 @@ class deck_builder(APIView):
                         data_source_confidence="Medium",
                         source_deck_id=deck.id,
                         is_deck_builder=True,
+                        is_pitch_deck=True,
                         owner=RegisteredUser.objects.get(user=request.user)
                     )
 
@@ -2073,7 +2074,8 @@ class add_deck_to_recommended(APIView):
                 cash_flow=None,
                 team_strength=f"Team size: {deck.team_members.count()} members" if deck.team_members.exists() else "",
                 market_position=market.competitive_advantage if market and market.competitive_advantage else "",
-                brand_reputation=funding_ask_text
+                brand_reputation=funding_ask_text,
+                is_pitch_deck=True
             )
 
             return Response({

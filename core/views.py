@@ -392,16 +392,21 @@ class dashboard(APIView):
         serializer = StartupSerializer(startups, many=True, context={'request': request})
         startup_data = serializer.data
 
+        # Apply risk filter based on calculated financial risk
         if risk:
             try:
                 risk_value = int(risk)
                 if risk_value <= 33:
+                    # Conservative: Low risk only
                     startup_data = [s for s in startup_data if s.get('risk_level') == 'Low']
                 elif risk_value <= 66:
+                    # Balanced: Low and Medium risk
                     startup_data = [s for s in startup_data if s.get('risk_level') in ['Low', 'Medium']]
+                # else: Aggressive: show all risk levels
             except ValueError:
                 pass
 
+        # Apply min_return filter (post-serialization)
         if min_return:
             try:
                 min_ret_val = float(min_return)
@@ -446,10 +451,6 @@ def sort_startups(startups, sort_by):
     return startups
 
 class StartupListView(ListAPIView):
-    """
-    API endpoint to list startups with filtering and sorting.
-    Uses existing StartupSerializer which calculates metrics on-the-fly.
-    """
     serializer_class = StartupSerializer
     
     def get_serializer_context(self):
@@ -471,6 +472,16 @@ class StartupListView(ListAPIView):
 
         params = self.request.query_params
 
+        # ---- STARTUP TYPE FILTER ----
+        startup_type = params.get('startup_type')
+        if startup_type == 'pitch_deck':
+            # Only show pitch decks (source_deck is not null)
+            qs = qs.filter(source_deck__isnull=False)
+        elif startup_type == 'financial':
+            # Only show regular startups (source_deck is null)
+            qs = qs.filter(source_deck__isnull=True)
+        # If no startup_type specified, show all
+
         # ---- FILTERS ----
         
         # Industry filter (case-insensitive)
@@ -478,20 +489,37 @@ class StartupListView(ListAPIView):
         if industry:
             qs = qs.filter(industry__iexact=industry)
 
-        # Minimum return filter - applied post-serialization
-        min_return = params.get('min_return')
-        self._min_return_filter = float(min_return) if min_return else None
+        # Minimum growth rate filter - applied post-serialization (CHANGED FROM min_return)
+        min_growth_rate = params.get('min_growth_rate')
+        self._min_growth_rate_filter = float(min_growth_rate) if min_growth_rate else None
+
+        # Risk level filter (Low/Medium/High) - applied post-serialization
+        risk_level = params.get('risk_level')
+        self._risk_level_filter = risk_level if risk_level else None
 
         # Risk slider (0-100) - applied post-serialization based on calculated financial risk
         risk = params.get('risk')
         self._risk_filter = int(risk) if risk else None
 
+        # Pitch Deck Filters
+        funding_ask_range = params.get('funding_ask_range')
+        self._funding_ask_range = funding_ask_range
+
+        market_growth_filter = params.get('market_growth_filter')
+        self._market_growth_filter = market_growth_filter
+
+        min_market_growth = params.get('min_market_growth')
+        self._min_market_growth = float(min_market_growth) if min_market_growth else None
+
         # ---- SORTING ----
         sort_by = params.get('sort_by')
+        deck_sort_by = params.get('deck_sort_by')
+        
+        # Use deck_sort_by if it exists, otherwise use sort_by
+        effective_sort = deck_sort_by or sort_by
         
         # For sorts that don't depend on calculated fields, use database ordering
-        if sort_by == 'confidence_desc':
-            # Sort by data source confidence: High > Medium > Low
+        if effective_sort == 'confidence_desc':
             confidence_order = Case(
                 When(data_source_confidence='High', then=Value(3)),
                 When(data_source_confidence='Medium', then=Value(2)),
@@ -500,29 +528,34 @@ class StartupListView(ListAPIView):
                 output_field=FloatField()
             )
             qs = qs.annotate(confidence_order=confidence_order).order_by('-confidence_order')
-        elif sort_by == 'company_name':
+        elif effective_sort == 'company_name':
             qs = qs.order_by('company_name')
+        elif effective_sort == 'funding_ask_desc':
+            qs = qs.order_by('-funding_ask')
+        elif effective_sort == 'funding_ask_asc':
+            qs = qs.order_by('funding_ask')
         else:
-            # For projected_return, reward_potential, and risk_level sorting,
-            # we'll sort after serialization since these are calculated fields
-            # Default: newest first
             qs = qs.order_by('-created_at')
         
         # Store sort preference for post-serialization sorting
-        self._sort_by = sort_by
+        self._sort_by = effective_sort
 
         return qs
     
     def list(self, request, *args, **kwargs):
-        """Override list to apply post-serialization filtering and sorting"""
         queryset = self.filter_queryset(self.get_queryset())
         
         serializer = self.get_serializer(queryset, many=True)
         data = serializer.data
         
-        # Apply financial risk filter (post-serialization)
-        # IMPORTANT: Only filter financial startups, exclude pitch decks (risk_level = None)
-        if hasattr(self, '_risk_filter') and self._risk_filter is not None:
+        # Apply risk level filter (Low/Medium/High) - post-serialization
+        if hasattr(self, '_risk_level_filter') and self._risk_level_filter:
+            risk_level = self._risk_level_filter
+            # Only filter financial startups with risk levels, exclude pitch decks
+            data = [item for item in data if item.get('risk_level') == risk_level]
+        
+        # Apply financial risk filter (slider 0-100) - post-serialization
+        elif hasattr(self, '_risk_filter') and self._risk_filter is not None:
             risk_value = self._risk_filter
             if risk_value <= 33:
                 # Conservative: Low risk only (exclude pitch decks with None)
@@ -532,20 +565,53 @@ class StartupListView(ListAPIView):
                 data = [item for item in data if item.get('risk_level') in ['Low', 'Medium']]
             # else: Aggressive: show all risk levels (including pitch decks)
         
-        # Apply min_return filter (post-serialization)
-        if hasattr(self, '_min_return_filter') and self._min_return_filter is not None:
+        # CHANGED: Apply min_growth_rate filter instead of min_return (post-serialization)
+        if hasattr(self, '_min_growth_rate_filter') and self._min_growth_rate_filter is not None:
             data = [
                 item for item in data 
-                if item.get('projected_return') is not None 
-                and item.get('projected_return') >= self._min_return_filter
+                if item.get('estimated_growth_rate') is not None 
+                and item.get('estimated_growth_rate') >= self._min_growth_rate_filter
+            ]
+        
+        # Apply funding ask range filter for pitch decks
+        if hasattr(self, '_funding_ask_range') and self._funding_ask_range:
+            funding_range = self._funding_ask_range
+            if funding_range == '0-100000':
+                data = [item for item in data if item.get('funding_ask') and float(item['funding_ask']) <= 100000]
+            elif funding_range == '100000-500000':
+                data = [item for item in data if item.get('funding_ask') and 100000 < float(item['funding_ask']) <= 500000]
+            elif funding_range == '500000-1000000':
+                data = [item for item in data if item.get('funding_ask') and 500000 < float(item['funding_ask']) <= 1000000]
+            elif funding_range == '1000000-5000000':
+                data = [item for item in data if item.get('funding_ask') and 1000000 < float(item['funding_ask']) <= 5000000]
+            elif funding_range == '5000000+':
+                data = [item for item in data if item.get('funding_ask') and float(item['funding_ask']) > 5000000]
+        
+        # Apply market growth filter
+        if hasattr(self, '_market_growth_filter') and self._market_growth_filter:
+            growth_filter = self._market_growth_filter
+            if growth_filter == 'Low':
+                data = [item for item in data if item.get('market_growth_rate') and 0 <= float(item['market_growth_rate']) < 10]
+            elif growth_filter == 'Medium':
+                data = [item for item in data if item.get('market_growth_rate') and 10 <= float(item['market_growth_rate']) < 30]
+            elif growth_filter == 'High':
+                data = [item for item in data if item.get('market_growth_rate') and float(item['market_growth_rate']) >= 30]
+        
+        # Apply min market growth filter
+        if hasattr(self, '_min_market_growth') and self._min_market_growth is not None:
+            data = [
+                item for item in data
+                if item.get('market_growth_rate') is not None
+                and float(item['market_growth_rate']) >= self._min_market_growth
             ]
         
         # Apply sorting that requires calculated fields
         sort_by = getattr(self, '_sort_by', None)
-        if sort_by == 'projected_return_desc':
-            data = sorted(data, key=lambda x: x.get('projected_return') or -999999, reverse=True)
-        elif sort_by == 'projected_return_asc':
-            data = sorted(data, key=lambda x: x.get('projected_return') or 999999)
+        # CHANGED: Sort by growth_rate instead of projected_return
+        if sort_by == 'growth_rate_desc':
+            data = sorted(data, key=lambda x: x.get('estimated_growth_rate') or -999999, reverse=True)
+        elif sort_by == 'growth_rate_asc':
+            data = sorted(data, key=lambda x: x.get('estimated_growth_rate') or 999999)
         elif sort_by == 'reward_potential_desc':
             data = sorted(data, key=lambda x: x.get('reward_potential') or 0, reverse=True)
         elif sort_by == 'risk_asc':
@@ -553,6 +619,10 @@ class StartupListView(ListAPIView):
             # Pitch decks (None) go to the end
             risk_order = {'Low': 1, 'Medium': 2, 'High': 3, None: 4}
             data = sorted(data, key=lambda x: risk_order.get(x.get('risk_level'), 4))
+        elif sort_by == 'market_growth_desc':
+            data = sorted(data, key=lambda x: float(x.get('market_growth_rate') or -999999), reverse=True)
+        elif sort_by == 'market_growth_asc':
+            data = sorted(data, key=lambda x: float(x.get('market_growth_rate') or 999999))
         
         return Response(data)
     

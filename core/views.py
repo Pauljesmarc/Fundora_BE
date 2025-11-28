@@ -2217,7 +2217,6 @@ class add_deck_to_recommended(APIView):
                 market_position=market.competitive_advantage if market and market.competitive_advantage else "",
                 brand_reputation=funding_ask_text,
                 is_deck_builder=True,
-                market_growth_rate=market.market_growth_rate if market and hasattr(market, 'market_growth_rate') else None
             )
 
             return Response({

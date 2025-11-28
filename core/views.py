@@ -1180,7 +1180,7 @@ def get_startup_analytics(startup):
     
     recent_comparisons = StartupComparison.objects.filter(
         startup=startup,
-        created_at__gte=thirty_days_ago
+        compared_at__gte=thirty_days_ago
     ).count()
     
     recent_watchlist = Watchlist.objects.filter(

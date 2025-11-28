@@ -162,6 +162,30 @@ class Startup(models.Model):
         blank=True,
         help_text="Debts due within one year"
     )
+
+    current_valuation = models.DecimalField(
+        max_digits=15, 
+        decimal_places=2, 
+        null=True, 
+        blank=True,
+        help_text="Current market valuation of the company"
+    )
+    
+    expected_future_valuation = models.DecimalField(
+        max_digits=15, 
+        decimal_places=2, 
+        null=True, 
+        blank=True,
+        help_text="Expected future valuation at target date"
+    )
+    
+    years_to_future_valuation = models.DecimalField(
+        max_digits=5, 
+        decimal_places=2, 
+        null=True, 
+        blank=True,
+        help_text="Number of years until expected future valuation is reached"
+    )
     
     # Additional Financial Data
     current_revenue = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)

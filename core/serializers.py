@@ -1,6 +1,8 @@
 import math
 from rest_framework import serializers
-from .models import RegisteredUser, Deck, Startup, Problem, Solution, MarketAnalysis, FundingAsk, TeamMember, FinancialProjection, Watchlist
+from .models import RegisteredUser, Deck, Startup, Problem, Solution, MarketAnalysis, FundingAsk, TeamMember, FinancialProjection, Watchlist, StartupView, StartupComparison
+from datetime import timedelta
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from django.contrib.auth.hashers import make_password
 from django.contrib.auth import get_user_model
@@ -105,6 +107,8 @@ class StartupSerializer(serializers.ModelSerializer):
     is_in_watchlist = serializers.SerializerMethodField()
     tagline = serializers.SerializerMethodField()
     market_growth_rate = serializers.SerializerMethodField()
+    analytics = serializers.SerializerMethodField()
+
 
     class Meta:
         model = Startup
@@ -145,6 +149,7 @@ class StartupSerializer(serializers.ModelSerializer):
             'updated_at',
             'is_in_watchlist',
             'market_growth_rate',
+            'analytics',
             'current_revenue',
             'previous_revenue',
             'time_between_periods',
@@ -471,6 +476,43 @@ class StartupSerializer(serializers.ModelSerializer):
             user=request.user,
             startup=obj
         ).exists()
+    
+    def get_analytics(self, obj):
+        """Get view and comparison analytics for this startup"""
+        thirty_days_ago = timezone.now() - timedelta(days=30)
+        
+        try:
+            total_views = StartupView.objects.filter(startup=obj).count()
+            unique_viewers = StartupView.objects.filter(startup=obj).values('user').distinct().count()
+            total_comparisons = StartupComparison.objects.filter(startup=obj).count()
+            unique_comparers = StartupComparison.objects.filter(startup=obj).values('user').distinct().count()
+            watchlist_count = Watchlist.objects.filter(startup=obj).count()
+            recent_views = StartupView.objects.filter(startup=obj, viewed_at__gte=thirty_days_ago).count()
+            recent_comparisons = StartupComparison.objects.filter(startup=obj, compared_at__gte=thirty_days_ago).count()
+            recent_watchlist = Watchlist.objects.filter(startup=obj, added_at__gte=thirty_days_ago).count()
+            
+            return {
+                'total_views': total_views,
+                'unique_viewers': unique_viewers,
+                'total_comparisons': total_comparisons,
+                'unique_comparers': unique_comparers,
+                'watchlist_count': watchlist_count,
+                'recent_views': recent_views,
+                'recent_comparisons': recent_comparisons,
+                'recent_watchlist': recent_watchlist,
+            }
+        except Exception as e:
+            print(f"Analytics error for startup {obj.id}: {e}")
+            return {
+                'total_views': 0,
+                'unique_viewers': 0,
+                'total_comparisons': 0,
+                'unique_comparers': 0,
+                'watchlist_count': 0,
+                'recent_views': 0,
+                'recent_comparisons': 0,
+                'recent_watchlist': 0,
+            }
 
 class ProblemSerializer(serializers.ModelSerializer):
     class Meta:

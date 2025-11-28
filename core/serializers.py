@@ -99,12 +99,12 @@ class StartupSerializer(serializers.ModelSerializer):
     risk_score = serializers.SerializerMethodField()
     reward_potential = serializers.SerializerMethodField()
     projected_return = serializers.SerializerMethodField()
+    pitch_deck_projected_return = serializers.SerializerMethodField()
     estimated_growth_rate = serializers.SerializerMethodField()
     display_industry = serializers.SerializerMethodField()
     is_in_watchlist = serializers.SerializerMethodField()
     tagline = serializers.SerializerMethodField()
     market_growth_rate = serializers.SerializerMethodField()
-
 
     class Meta:
         model = Startup
@@ -137,6 +137,7 @@ class StartupSerializer(serializers.ModelSerializer):
             'reward_potential',
             'estimated_growth_rate',
             'projected_return',
+            'pitch_deck_projected_return',
             'risk_level',
             'risk_score',
             'owner_email',
@@ -151,6 +152,9 @@ class StartupSerializer(serializers.ModelSerializer):
             'ebit',
             'current_assets',
             'current_liabilities',
+            'current_valuation',
+            'expected_future_valuation',
+            'years_to_future_valuation',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'owner_email', 'source_deck_id']
 
@@ -181,68 +185,77 @@ class StartupSerializer(serializers.ModelSerializer):
             return obj.industry
         return "—"
     
-    
     def get_market_growth_rate(self, obj):
         """Get market growth rate from source deck if available"""
         if not obj.source_deck:
             return None
         
         try:
-            # Access the OneToOne relationship - will raise DoesNotExist if not present
             market_analysis = obj.source_deck.market_analysis
             if market_analysis and market_analysis.market_growth_rate is not None:
                 return float(market_analysis.market_growth_rate)
         except Exception:
-            # Handle all exceptions (DoesNotExist, AttributeError, etc.)
             return None
         
         return None
 
     def get_risk_level(self, obj):
         """
-        Uses Original Altman Z-Score with 5-level risk assessment
-        Z = 1.2A + 1.4B + 3.3C + 0.6D + 1.0E
+        Uses Altman Z-Score Formula for Private Companies (Z')
+        Z' = 0.717 x (Working Capital / Total Assets) 
+             + 0.847 x (Retained Earnings / Total Assets) 
+             + 3.107 x (EBIT / Total Assets) 
+             + 0.420 x (Book Value of Equity / Total Liabilities) 
+             + 0.998 x (Sales / Total Assets)
         
-        Risk Levels (1-5):
-        - Z > 3.0:  Very Low Risk (1/5)
-        - 2.6-3.0:  Low Risk (2/5)
-        - 1.8-2.6:  Medium Risk (3/5)
-        - 1.1-1.8:  High Risk (4/5)
-        - Z < 1.1:  Very High Risk (5/5)
+        Where:
+        - Working Capital = Current Assets - Current Liabilities
+        - Book Value of Equity = Total Assets - Total Liabilities
+        - Sales = Revenue
+        
+        Risk Assessment:
+        - Z' < 1.23:  Very Risky
+        - 1.23 - 1.8: Risky
+        - 1.8 - 2.9: Average
+        - 2.9 - 3.5: Good
+        - Z' > 3.5:  Excellent
         """
         try:
             total_assets = float(obj.total_assets or 0)
             total_liabilities = float(obj.total_liabilities or 0)
-            shareholder_equity = float(obj.shareholder_equity or 0)
             retained_earnings = float(getattr(obj, 'retained_earnings', 0) or 0)
             ebit = float(getattr(obj, 'ebit', 0) or 0)
             current_assets = float(getattr(obj, 'current_assets', 0) or 0)
             current_liabilities = float(getattr(obj, 'current_liabilities', 0) or 0)
-            revenue = float(obj.revenue or getattr(obj, 'current_revenue', 0) or 0)
+            sales = float(obj.revenue or getattr(obj, 'current_revenue', 0) or 0)
             
             if total_assets <= 0:
                 return None
             
+            # Calculate components
             working_capital = current_assets - current_liabilities
+            book_value_of_equity = total_assets - total_liabilities
             
-            A = working_capital / total_assets
-            B = retained_earnings / total_assets
-            C = ebit / total_assets
-            D = shareholder_equity / total_liabilities if total_liabilities > 0 else 1.0
-            E = revenue / total_assets
+            # Apply Altman Z' Formula for Private Companies
+            x1 = 0.717 * (working_capital / total_assets)
+            x2 = 0.847 * (retained_earnings / total_assets)
+            x3 = 3.107 * (ebit / total_assets)
+            x4 = 0.420 * (book_value_of_equity / total_liabilities) if total_liabilities > 0 else 0
+            x5 = 0.998 * (sales / total_assets)
             
-            z_score = (1.2 * A) + (1.4 * B) + (3.3 * C) + (0.6 * D) + (1.0 * E)
+            z_prime = x1 + x2 + x3 + x4 + x5
             
-            if z_score > 3.0:
-                return 'Very Low'
-            elif z_score > 2.6:
-                return 'Low'
-            elif z_score > 1.8:
-                return 'Medium'
-            elif z_score > 1.1:
-                return 'High'
+            # Assess risk based on Z' score
+            if z_prime > 3.5:
+                return 'Excellent'
+            elif z_prime > 2.9:
+                return 'Good'
+            elif z_prime > 1.8:
+                return 'Average'
+            elif z_prime > 1.23:
+                return 'Risky'
             else:
-                return 'Very High'
+                return 'Very Risky'
                 
         except Exception as e:
             print(f"Risk calculation error: {e}")
@@ -250,95 +263,86 @@ class StartupSerializer(serializers.ModelSerializer):
         
     def get_risk_score(self, obj):
         """
-        Convert risk level to numeric score (1-5)
-        - Very Low = 1/5
-        - Low = 2/5
-        - Medium = 3/5
-        - High = 4/5
-        - Very High = 5/5
-        - None = None (no default number)
-        """
-        risk_level = self.get_risk_level(obj)
+        Convert Z' score to numeric score (1-5) for more granularity
+        While risk_level remains as 3 categories (Low, Medium, High)
         
-        if risk_level is None:
+        Mapping:
+        - Z' > 3.5: Score 1 (Excellent)
+        - Z' 2.9-3.5: Score 2 (Good)
+        - Z' 1.8-2.9: Score 3 (Average)
+        - Z' 1.23-1.8: Score 4 (Risky)
+        - Z' < 1.23: Score 5 (Very Risky)
+        """
+        try:
+            total_assets = float(obj.total_assets or 0)
+            total_liabilities = float(obj.total_liabilities or 0)
+            retained_earnings = float(getattr(obj, 'retained_earnings', 0) or 0)
+            ebit = float(getattr(obj, 'ebit', 0) or 0)
+            current_assets = float(getattr(obj, 'current_assets', 0) or 0)
+            current_liabilities = float(getattr(obj, 'current_liabilities', 0) or 0)
+            sales = float(obj.revenue or getattr(obj, 'current_revenue', 0) or 0)
+            
+            if total_assets <= 0:
+                return None
+            
+            # Calculate Z' score components
+            working_capital = current_assets - current_liabilities
+            book_value_of_equity = total_assets - total_liabilities
+            
+            x1 = 0.717 * (working_capital / total_assets)
+            x2 = 0.847 * (retained_earnings / total_assets)
+            x3 = 3.107 * (ebit / total_assets)
+            x4 = 0.420 * (book_value_of_equity / total_liabilities) if total_liabilities > 0 else 0
+            x5 = 0.998 * (sales / total_assets)
+            
+            z_prime = x1 + x2 + x3 + x4 + x5
+            
+            if z_prime > 3.5:
+                return 1
+            elif z_prime > 2.9:
+                return 2
+            elif z_prime > 1.8:
+                return 3
+            elif z_prime > 1.23:
+                return 4
+            else:
+                return 5
+                
+        except Exception as e:
+            print(f"Risk score calculation error: {e}")
             return None
-        
-        risk_mapping = {
-            'Very Low': 1,
-            'Low': 2,
-            'Medium': 3,
-            'High': 4,
-            'Very High': 5
-        }
-        
-        return risk_mapping.get(risk_level, None)
     
-    def _get_risk_multiplier(self, risk_level):
-        """
-        Get risk multiplier based on risk level
-        High Risk = 0.50, Medium Risk = 0.75, Low Risk = 1.00
-        """
-        if risk_level is None:
-            return 0.75  # Default to medium risk
-        
-        risk_multipliers = {
-            'Very Low': 1.00,
-            'Low': 1.00,
-            'Medium': 0.75,
-            'High': 0.50,
-            'Very High': 0.50
-        }
-        
-        return risk_multipliers.get(risk_level, 0.75)
-
     def get_reward_potential(self, obj):
         """
         Uses Return on Equity (ROE) to measure profitability
-        ROE = (Net Income / Shareholder Equity) × 100
-        Matches calculate_reward_potential() function in views.py
+        ROE = Net Income / Equity
+        where Equity = Total Assets - Total Liabilities
         """
         try:
             net_income = float(obj.net_income or 0)
-            shareholder_equity = float(obj.shareholder_equity or 0)
             total_assets = float(obj.total_assets or 0)
+            total_liabilities = float(obj.total_liabilities or 0)
 
-            # Check if we have ANY usable data
-            if shareholder_equity <= 0 and total_assets <= 0:
+            # Calculate equity from total assets and liabilities
+            equity = total_assets - total_liabilities
+
+            # Check if we have usable data
+            if equity <= 0:
                 return "N/A"
             
-            # Primary: Calculate ROE
-            if shareholder_equity > 0:
-                roe_percentage = (net_income / shareholder_equity) * 100    
-                
-                # Convert ROE to 1-5 scale
-                if roe_percentage >= 20:
-                    return 5.0  # Excellent
-                elif roe_percentage >= 15:
-                    return 4.0  # Good
-                elif roe_percentage >= 10:
-                    return 3.0  # Average
-                elif roe_percentage >= 5:
-                    return 2.0  # Below Average
-                else:
-                    return 1.0  # Low Reward
+            roe_percentage = (net_income / equity) * 100    
             
-            # Fallback: Calculate ROA if equity not available
-            elif total_assets > 0:
-                roa_percentage = (net_income / total_assets) * 100
-                
-                # Convert ROA to 1-5 scale
-                if roa_percentage >= 15:
-                    return 5.0
-                elif roa_percentage >= 10:
-                    return 4.0
-                elif roa_percentage >= 5:
-                    return 3.0
-                elif roa_percentage >= 2:
-                    return 2.0
-                else:
-                    return 1.0
-            
-            return "N/A"
+            # Convert ROE to 1-5 scale
+            if roe_percentage >= 20:
+                return 5.0
+            elif roe_percentage >= 15:
+                return 4.0
+            elif roe_percentage >= 10:
+                return 3.0
+            elif roe_percentage >= 5:
+                return 2.0
+            else:
+                return 1.0
             
         except Exception as e:
             print(f"Reward potential calculation error: {e}")
@@ -346,63 +350,75 @@ class StartupSerializer(serializers.ModelSerializer):
         
     def get_projected_return(self, obj):
         """
-        Calculate Projected Return using IRR-based approach
-        IRR = (Expected Future Valuation / Current Valuation)^(1/years) - 1
+        Calculate Projected Return ONLY for normal startups using IRR formula
+        Uses explicit valuation fields: current_valuation, expected_future_valuation, years_to_future_valuation
         
-        Uses revenue as proxy for valuation
-        For pitch decks: Uses financial projections
-        For regular startups: Uses revenue history
-        Applies risk adjustment based on risk level
+        Formula: IRR = (Expected Future Valuation / Current Valuation)^(1/years) - 1
+        Returns as percentage. Pure calculation without risk adjustment.
+        
+        For pitch decks, use get_pitch_deck_projected_return() instead
         """
         try:
-            if obj.source_deck:
-                financials = obj.source_deck.financials.all().order_by('year')
-                
-                if financials.count() >= 2:
-                    earliest = financials.first()
-                    latest = financials.last()
-                    
-                    current_valuation = float(earliest.revenue)
-                    future_valuation = float(latest.revenue)
-                    years = latest.year - earliest.year
-                    
-                    if current_valuation > 0 and future_valuation > 0 and years > 0:
-                        # IRR = (Future / Current)^(1/years) - 1
-                        irr = (math.pow(future_valuation / current_valuation, 1 / years) - 1) * 100
-                        
-                        # Apply risk adjustment
-                        risk_level = self.get_risk_level(obj)
-                        risk_multiplier = self._get_risk_multiplier(risk_level)
-                        
-                        # Risk-Adjusted Return = IRR × Risk Multiplier
-                        adjusted_return = irr * risk_multiplier
-                        
-                        return round(max(min(adjusted_return, 200), -100), 2)
-                
-                return None
+            current_valuation = float(getattr(obj, 'current_valuation', 0) or 0)
+            expected_future_valuation = float(getattr(obj, 'expected_future_valuation', 0) or 0)
+            years_to_future_valuation = float(getattr(obj, 'years_to_future_valuation', 1) or 1)
             
-            # Regular startup calculation
-            current_valuation = float(getattr(obj, 'previous_revenue', 0) or 0)
-            future_valuation = float(obj.revenue or getattr(obj, 'current_revenue', 0) or 0)
-            years = float(getattr(obj, 'time_between_periods', 1) or 1)
+            if current_valuation > 0 and expected_future_valuation > 0 and years_to_future_valuation > 0:
+                # IRR = (Expected Future Valuation / Current Valuation)^(1/years) - 1
+                irr = (math.pow(expected_future_valuation / current_valuation, 1 / years_to_future_valuation) - 1) * 100
+                return round(max(min(irr, 200), -100), 2)
             
-            if current_valuation <= 0 or future_valuation <= 0 or years <= 0:
-                return None
-            
-            # IRR = (Future / Current)^(1/years) - 1
-            irr = (math.pow(future_valuation / current_valuation, 1 / years) - 1) * 100
-            
-            # Apply risk adjustment
-            risk_level = self.get_risk_level(obj)
-            risk_multiplier = self._get_risk_multiplier(risk_level)
-            
-            # Risk-Adjusted Return = IRR × Risk Multiplier
-            adjusted_return = irr * risk_multiplier
-            
-            return round(max(min(adjusted_return, 200), -100), 2)
+            return None
             
         except Exception as e:
             print(f"Projected return calculation error: {e}")
+            return None
+    
+    def get_pitch_deck_projected_return(self, obj):
+        """
+        Uses pitch deck data: current_valuation, projected_revenue, industry_multiple, years_to_projection
+        
+        Formula:
+        Future Valuation = Projected Revenue × Industry Multiple
+        IRR = (Future Valuation / Current Valuation)^(1/years) - 1
+        """
+        try:
+            if not obj.source_deck:
+                return None
+            
+            try:
+                current_valuation = float(getattr(obj.source_deck.ask, 'amount', 0) or 0) if obj.source_deck.ask else 0
+            except:
+                current_valuation = 0
+            
+            try:
+                financials = obj.source_deck.financials.all().order_by('year')
+                market_analysis = obj.source_deck.market_analysis
+                
+                if financials.count() >= 1 and market_analysis:
+                    latest_financial = financials.last()
+                    projected_revenue = float(latest_financial.revenue or 0)
+                    industry_multiple = float(getattr(market_analysis, 'valuation_multiple', 0) or 0)
+                    
+                    # Calculate years from earliest to latest projection
+                    earliest_financial = financials.first()
+                    years_to_projection = latest_financial.year - earliest_financial.year
+                    
+                    # Verify all required values
+                    if current_valuation > 0 and projected_revenue > 0 and industry_multiple > 0 and years_to_projection > 0:
+                        # Future Valuation = Projected Revenue × Industry Multiple
+                        future_valuation = projected_revenue * industry_multiple
+                        
+                        # IRR = (Future Valuation / Current Valuation)^(1/years) - 1
+                        irr = (math.pow(future_valuation / current_valuation, 1 / years_to_projection) - 1) * 100
+                        return round(max(min(irr, 200), -100), 2)
+            except:
+                pass
+            
+            return None
+            
+        except Exception as e:
+            print(f"Pitch deck projected return calculation error: {e}")
             return None
 
     def get_estimated_growth_rate(self, obj):

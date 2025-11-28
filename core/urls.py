@@ -102,5 +102,8 @@ urlpatterns = [
     # Startup Profile
     path('startup/profile/', views.StartupProfileAccountView.as_view(), name='startup-profile-account'),
 
+    # Projection
+    path('deck-builder/pitch-financials/', views.save_pitch_deck_financials.as_view(), name='save_pitch_financials'),
+
     path('test/', TestAPI.as_view(), name='test-api'),
 ]

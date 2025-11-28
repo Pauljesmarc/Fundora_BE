@@ -213,12 +213,12 @@ class StartupSerializer(serializers.ModelSerializer):
         - Book Value of Equity = Total Assets - Total Liabilities
         - Sales = Revenue
         
-        Risk Assessment:
-        - Z' < 1.23:  Very Risky
-        - 1.23 - 1.8: Risky
-        - 1.8 - 2.9: Average
-        - 2.9 - 3.5: Good
-        - Z' > 3.5:  Excellent
+        Risk Assessment (mapped to Low/Medium/High only):
+        - Z' < 1.23:  Very Risky → High
+        - 1.23 - 1.8: Risky → High
+        - 1.8 - 2.9: Average → Medium
+        - 2.9 - 3.5: Good → Low
+        - Z' > 3.5:  Excellent → Low
         """
         try:
             total_assets = float(obj.total_assets or 0)
@@ -245,17 +245,12 @@ class StartupSerializer(serializers.ModelSerializer):
             
             z_prime = x1 + x2 + x3 + x4 + x5
             
-            # Assess risk based on Z' score
-            if z_prime > 3.5:
-                return 'Excellent'
-            elif z_prime > 2.9:
-                return 'Good'
+            if z_prime > 2.9:
+                return 'Low'
             elif z_prime > 1.8:
-                return 'Average'
-            elif z_prime > 1.23:
-                return 'Risky'
+                return 'Medium'
             else:
-                return 'Very Risky'
+                return 'High'
                 
         except Exception as e:
             print(f"Risk calculation error: {e}")

@@ -497,13 +497,20 @@ class StartupListView(ListAPIView):
         min_return = params.get('min_return')
         self._min_return_filter = float(min_return) if min_return else None
 
-        # Risk level filter (Low/Medium/High) - applied post-serialization
-        risk_level = params.get('risk_level')
-        self._risk_level_filter = risk_level if risk_level else None
+        # Risk tolerance filter (Low/Medium/High) - applied post-serialization
+        risk_tolerance = params.get('risk_tolerance')
+        self._risk_tolerance_filter = risk_tolerance if risk_tolerance else None
 
         # Risk slider (0-100) - applied post-serialization based on calculated financial risk
         risk = params.get('risk')
         self._risk_filter = int(risk) if risk else None
+
+        # Minimum growth rate filter - only for financial startups, not pitch decks
+        min_growth_rate = params.get('min_growth_rate')
+        if min_growth_rate and startup_type != 'pitch_deck':
+            self._min_growth_rate_filter = float(min_growth_rate)
+        else:
+            self._min_growth_rate_filter = None
 
         # Pitch Deck Filters
         funding_ask_range = params.get('funding_ask_range')
@@ -521,6 +528,11 @@ class StartupListView(ListAPIView):
         
         # Use deck_sort_by if it exists, otherwise use sort_by
         effective_sort = deck_sort_by or sort_by
+        
+        if effective_sort == 'growth_rate_desc':
+            effective_sort = 'projected_return_desc'
+        elif effective_sort == 'growth_rate_asc':
+            effective_sort = 'projected_return_asc'
         
         # For sorts that don't depend on calculated fields, use database ordering
         if effective_sort == 'confidence_desc':
@@ -552,11 +564,18 @@ class StartupListView(ListAPIView):
         serializer = self.get_serializer(queryset, many=True)
         data = serializer.data
         
-        # Apply risk level filter (Low/Medium/High) - post-serialization
-        if hasattr(self, '_risk_level_filter') and self._risk_level_filter:
-            risk_level = self._risk_level_filter
-            # Only filter financial startups with risk levels, exclude pitch decks
-            data = [item for item in data if item.get('risk_level') == risk_level]
+        # Only filters financial startups, excludes pitch decks
+        if hasattr(self, '_risk_tolerance_filter') and self._risk_tolerance_filter:
+            risk_tolerance = self._risk_tolerance_filter
+            if risk_tolerance == 'Low':
+                # Show only Low risk financial startups
+                data = [item for item in data if item.get('risk_level') == 'Low']
+            elif risk_tolerance == 'Medium':
+                # Show only Medium risk financial startups
+                data = [item for item in data if item.get('risk_level') == 'Medium']
+            elif risk_tolerance == 'High':
+                # Show only High risk financial startups
+                data = [item for item in data if item.get('risk_level') == 'High']
         
         # Apply financial risk filter (slider 0-100) - post-serialization
         elif hasattr(self, '_risk_filter') and self._risk_filter is not None:
@@ -575,6 +594,13 @@ class StartupListView(ListAPIView):
                 item for item in data 
                 if item.get('projected_return') is not None 
                 and item.get('projected_return') >= self._min_return_filter
+            ]
+        
+        if hasattr(self, '_min_growth_rate_filter') and self._min_growth_rate_filter is not None:
+            data = [
+                item for item in data
+                if item.get('projected_return') is not None
+                and item.get('projected_return') >= self._min_growth_rate_filter
             ]
         
         # Apply funding ask range filter for pitch decks
@@ -1063,14 +1089,58 @@ class DeleteComparisonSetView(APIView):
                 status=status.HTTP_404_NOT_FOUND
             )
 
-def get_risk_level(confidence):
-    """Helper function to get risk level based on confidence"""
-    if confidence == 'High':
-        return 'Low Risk'
-    elif confidence == 'Medium':
-        return 'Medium Risk'
-    else:
-        return 'High Risk'
+def get_risk_level(self, obj):
+    """
+    Uses Altman Z-Score Formula for Private Companies (Z')
+    Maps to 3 risk categories: Low, Medium, High
+    
+    Z' = 0.717 x (Working Capital / Total Assets) 
+         + 0.847 x (Retained Earnings / Total Assets) 
+         + 3.107 x (EBIT / Total Assets) 
+         + 0.420 x (Book Value of Equity / Total Liabilities) 
+         + 0.998 x (Sales / Total Assets)
+    
+    Risk Mapping:
+    - Z' > 2.9: Low Risk (Excellent/Good)
+    - Z' 1.8-2.9: Medium Risk (Average)
+    - Z' < 1.8: High Risk (Risky/Very Risky)
+    """
+    try:
+        total_assets = float(obj.total_assets or 0)
+        total_liabilities = float(obj.total_liabilities or 0)
+        retained_earnings = float(getattr(obj, 'retained_earnings', 0) or 0)
+        ebit = float(getattr(obj, 'ebit', 0) or 0)
+        current_assets = float(getattr(obj, 'current_assets', 0) or 0)
+        current_liabilities = float(getattr(obj, 'current_liabilities', 0) or 0)
+        sales = float(obj.revenue or getattr(obj, 'current_revenue', 0) or 0)
+        
+        if total_assets <= 0:
+            return None
+        
+        # Calculate components
+        working_capital = current_assets - current_liabilities
+        book_value_of_equity = total_assets - total_liabilities
+        
+        # Apply Altman Z' Formula for Private Companies
+        x1 = 0.717 * (working_capital / total_assets)
+        x2 = 0.847 * (retained_earnings / total_assets)
+        x3 = 3.107 * (ebit / total_assets)
+        x4 = 0.420 * (book_value_of_equity / total_liabilities) if total_liabilities > 0 else 0
+        x5 = 0.998 * (sales / total_assets)
+        
+        z_prime = x1 + x2 + x3 + x4 + x5
+        
+        # Map to Low/Medium/High categories
+        if z_prime > 2.9:
+            return 'Low'
+        elif z_prime > 1.8:
+            return 'Medium'
+        else:
+            return 'High'
+            
+    except Exception as e:
+        print(f"Risk calculation error: {e}")
+        return None
 
 def get_risk_color(confidence):
     """Helper function to get risk color class"""
@@ -1272,15 +1342,6 @@ def get_startup_analytics(startup):
         'recent_comparisons': recent_comparisons,
         'recent_watchlist': recent_watchlist,
     }
-
-def get_risk_level(confidence):
-    """Helper function to get risk level based on confidence"""
-    if confidence == 'High':
-        return 'Low Risk'
-    elif confidence == 'Medium':
-        return 'Medium Risk'
-    else:
-        return 'High Risk'
 
 def get_risk_color(confidence):
     """Helper function to get risk color class"""

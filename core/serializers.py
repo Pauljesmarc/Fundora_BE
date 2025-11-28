@@ -130,7 +130,6 @@ class StartupSerializer(serializers.ModelSerializer):
             'funding_ask',
             'source_deck_id',
             'is_deck_builder',
-            'is_pitch_deck',
             'team_strength',
             'market_position',
             'brand_reputation',

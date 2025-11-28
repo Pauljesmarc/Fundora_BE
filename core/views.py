@@ -1186,7 +1186,7 @@ def get_startup_analytics(startup):
     
     recent_watchlist = Watchlist.objects.filter(
         startup=startup,
-        created_at__gte=thirty_days_ago
+        added_at__gte=thirty_days_ago
     ).count()
     
     return {

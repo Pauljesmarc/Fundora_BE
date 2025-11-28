@@ -392,16 +392,21 @@ class dashboard(APIView):
         serializer = StartupSerializer(startups, many=True, context={'request': request})
         startup_data = serializer.data
 
+        # Apply risk filter based on calculated financial risk
         if risk:
             try:
                 risk_value = int(risk)
                 if risk_value <= 33:
+                    # Conservative: Low risk only
                     startup_data = [s for s in startup_data if s.get('risk_level') == 'Low']
                 elif risk_value <= 66:
+                    # Balanced: Low and Medium risk
                     startup_data = [s for s in startup_data if s.get('risk_level') in ['Low', 'Medium']]
+                # else: Aggressive: show all risk levels
             except ValueError:
                 pass
 
+        # Apply min_return filter (post-serialization)
         if min_return:
             try:
                 min_ret_val = float(min_return)

@@ -2233,6 +2233,54 @@ class add_deck_to_recommended(APIView):
             print(f"Error in AddDeckToRecommendedView: {str(e)}")
             print(traceback.format_exc())
             return Response({'success': False, 'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+class save_pitch_deck_financials(APIView):
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        deck_id = request.data.get('deck_id')
+        current_valuation = request.data.get('current_valuation')
+        industry_multiple = request.data.get('industry_multiple')
+        years_to_projection = request.data.get('years_to_projection')
+        projected_revenue = request.data.get('projected_revenue')
+
+        if not deck_id:
+            return Response({'error': 'deck_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            startup_user_id = request.session.get('startup_user_id')
+            user = RegisteredUser.objects.get(id=startup_user_id)
+            deck = get_object_or_404(Deck, id=deck_id, owner=user)
+
+            # Save to market_analysis for valuation multiple
+            market_analysis, created = MarketAnalysis.objects.get_or_create(deck=deck)
+            market_analysis.valuation_multiple = industry_multiple
+            market_analysis.save()
+
+            # Create or update the financial projection record for the final year
+            FinancialProjection.objects.update_or_create(
+                deck=deck,
+                year=years_to_projection,
+                defaults={
+                    'revenue': projected_revenue,
+                    'profit': None  # Can be calculated later if needed
+                }
+            )
+
+            # Also update the FundingAsk with current valuation
+            FundingAsk.objects.update_or_create(
+                deck=deck,
+                defaults={'amount': current_valuation}
+            )
+
+            return Response({
+                'success': True,
+                'message': 'Financial projections saved successfully'
+            }, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class debug_session(APIView):
     permission_classes = [IsAuthenticated]

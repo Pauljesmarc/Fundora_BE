@@ -291,6 +291,9 @@ class deck_builder(APIView):
                 # Create Startup entry linked to Deck, if not already existing
                 from .models import Startup
                 if not Startup.objects.filter(source_deck_id=deck.id).exists():
+                    market = getattr(deck, 'market_analysis', None)
+                    market_growth_rate = market.market_growth_rate if market and hasattr(market, 'market_growth_rate') else None
+                    
                     Startup.objects.create(
                         company_name=getattr(deck, "company_name", "Untitled Deck"),
                         company_description=getattr(deck, "description", ""),
@@ -298,7 +301,8 @@ class deck_builder(APIView):
                         data_source_confidence="Medium",
                         source_deck_id=deck.id,
                         is_deck_builder=True,
-                        is_pitch_deck=True,
+                        funding_ask=getattr(deck.ask, 'amount', None) if hasattr(deck, 'ask') else None,
+                        market_growth_rate=market_growth_rate,
                         owner=RegisteredUser.objects.get(user=request.user)
                     )
 
@@ -2209,7 +2213,8 @@ class add_deck_to_recommended(APIView):
                 team_strength=f"Team size: {deck.team_members.count()} members" if deck.team_members.exists() else "",
                 market_position=market.competitive_advantage if market and market.competitive_advantage else "",
                 brand_reputation=funding_ask_text,
-                is_pitch_deck=True
+                is_deck_builder=True,
+                market_growth_rate=market.market_growth_rate if market and hasattr(market, 'market_growth_rate') else None
             )
 
             return Response({
@@ -2670,18 +2675,20 @@ class create_ask(APIView):
                 funding_ask=serializer.instance.amount
             )
 
-            # ✅ Create Startup shell if not already linked
             if not Startup.objects.filter(source_deck=deck).exists():
+                market = getattr(deck, 'market_analysis', None)
                 Startup.objects.create(
-                    owner=owner,  # assuming profile.user is the RegisteredUser
+                    owner=owner,
                     company_name=deck.company_name,
-                    industry='—',  # optional: prompt later or infer from deck
+                    industry='—',
                     company_description=deck.tagline or '',
                     data_source_confidence='Medium',
                     confidence_percentage=50,
                     funding_ask=serializer.instance.amount,
                     source_deck=deck,
-                )
+                    is_deck_builder=True,
+                    market_growth_rate=market.market_growth_rate if market and hasattr(market, 'market_growth_rate') else None
+            )
 
             return Response({
                 'success': True,

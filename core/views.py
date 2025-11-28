@@ -603,8 +603,8 @@ class StartupListView(ListAPIView):
         if hasattr(self, '_min_growth_rate_filter') and self._min_growth_rate_filter is not None:
             data = [
                 item for item in data
-                if item.get('projected_return') is not None
-                and item.get('projected_return') >= self._min_growth_rate_filter
+                if item.get('estimated_growth_rate') is not None
+                and item.get('estimated_growth_rate') >= self._min_growth_rate_filter
             ]
         
         # Apply funding ask range filter for pitch decks

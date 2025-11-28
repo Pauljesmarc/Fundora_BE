@@ -2737,7 +2737,6 @@ class create_ask(APIView):
                     funding_ask=serializer.instance.amount,
                     source_deck=deck,
                     is_deck_builder=True,
-                    market_growth_rate=market.market_growth_rate if market and hasattr(market, 'market_growth_rate') else None
             )
 
             return Response({

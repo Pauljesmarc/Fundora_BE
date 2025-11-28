@@ -971,7 +971,7 @@ class add_to_watchlist(APIView):
         }, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
 
 class remove_from_watchlist(APIView):
-    def delete(self, request, startup_id):
+    def post(self, request, startup_id):
         if not request.user.is_authenticated:
             return Response({"success": False, "message": "Login required"}, status=status.HTTP_401_UNAUTHORIZED)
         
@@ -1208,7 +1208,10 @@ class compare_startups(APIView):
         if not user.is_authenticated:
             return Response({"error": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
 
-        startups = Startup.objects.select_related('owner__user', 'source_deck').all()
+        startups = Startup.objects.select_related('owner__user', 'source_deck').filter(
+            source_deck__isnull=True, 
+            is_deck_builder=False
+        )
         
         serializer = StartupSerializer(startups, many=True, context={'request': request})
         startup_data = serializer.data

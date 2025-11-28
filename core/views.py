@@ -497,10 +497,6 @@ class StartupListView(ListAPIView):
         if industry:
             qs = qs.filter(industry__iexact=industry)
 
-        # Minimum return filter - applied post-serialization
-        min_return = params.get('min_return')
-        self._min_return_filter = float(min_return) if min_return else None
-
         # Risk tolerance filter (Low/Medium/High) - applied post-serialization
         risk_tolerance = params.get('risk_tolerance')
         self._risk_tolerance_filter = risk_tolerance if risk_tolerance else None
@@ -592,14 +588,6 @@ class StartupListView(ListAPIView):
                 data = [item for item in data if item.get('risk_level') in ['Low', 'Medium']]
             # else: Aggressive: show all risk levels (including pitch decks)
         
-        # Apply min_return filter (post-serialization)
-        if hasattr(self, '_min_return_filter') and self._min_return_filter is not None:
-            data = [
-                item for item in data 
-                if item.get('projected_return') is not None 
-                and item.get('projected_return') >= self._min_return_filter
-            ]
-        
         if hasattr(self, '_min_growth_rate_filter') and self._min_growth_rate_filter is not None:
             data = [
                 item for item in data
@@ -642,9 +630,9 @@ class StartupListView(ListAPIView):
         # Apply sorting that requires calculated fields
         sort_by = getattr(self, '_sort_by', None)
         if sort_by == 'projected_return_desc':
-            data = sorted(data, key=lambda x: x.get('projected_return') or -999999, reverse=True)
+            data = sorted(data, key=lambda x: x.get('estimated_growth_rate') or -999999, reverse=True)
         elif sort_by == 'projected_return_asc':
-            data = sorted(data, key=lambda x: x.get('projected_return') or 999999)
+            data = sorted(data, key=lambda x: x.get('estimated_growth_rate') or 999999)
         elif sort_by == 'reward_potential_desc':
             data = sorted(data, key=lambda x: x.get('reward_potential') or 0, reverse=True)
         elif sort_by == 'risk_asc':

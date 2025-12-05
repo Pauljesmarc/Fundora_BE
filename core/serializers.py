@@ -160,6 +160,15 @@ class StartupSerializer(serializers.ModelSerializer):
             'current_valuation',
             'expected_future_valuation',
             'years_to_future_valuation',
+            'contact_email',
+            'contact_phone',
+            'website_url',
+            'linkedin_url',
+            'location',
+            'founder_name',
+            'founder_title',
+            'founder_linkedin',
+            'year_founded',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'owner_email', 'source_deck_id']
 

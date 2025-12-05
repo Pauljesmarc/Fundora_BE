@@ -315,12 +315,6 @@ class deck_builder(APIView):
 
 class investor_registration(APIView):
     def post(self, request):
-        if not request.data.get('terms'):
-            return Response(
-                {"error": "You must agree to the Terms of Service and Privacy Policy."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
         serializer = InvestorRegistrationSerializer(data=request.data)
         if serializer.is_valid():
             serializer.save()
@@ -1585,12 +1579,6 @@ class delete_deck(APIView):
 
 class startup_registration(APIView):
     def post(self, request):
-        if not request.data.get('terms'):
-            return Response(
-                {"error": "You must agree to the Terms of Service and Privacy Policy."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
         serializer = StartupRegistrationSerializer(data=request.data)
         if serializer.is_valid():
             serializer.save()

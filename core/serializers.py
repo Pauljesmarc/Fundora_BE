@@ -78,6 +78,35 @@ class LoginSerializer(serializers.Serializer):
 
         attrs['user'] = user
         return attrs
+    
+class RegisteredUserProfileSerializer(serializers.ModelSerializer):
+    email = serializers.EmailField(source='user.email', read_only=True)
+    first_name = serializers.CharField(source='user.first_name')
+    last_name = serializers.CharField(source='user.last_name')
+    
+    class Meta:
+        model = RegisteredUser
+        fields = [
+            'email', 'first_name', 'last_name',
+            'contact_email', 'contact_phone', 'website_url', 'linkedin_url', 'location',
+            'founder_name', 'founder_title', 'founder_linkedin'
+        ]
+    
+    def update(self, instance, validated_data):
+        # Update User fields
+        user_data = validated_data.pop('user', {})
+        if 'first_name' in user_data:
+            instance.user.first_name = user_data['first_name']
+        if 'last_name' in user_data:
+            instance.user.last_name = user_data['last_name']
+        instance.user.save()
+        
+        # Update RegisteredUser fields
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        
+        return instance
 
 class DeckSerializer(serializers.ModelSerializer):
     class Meta:

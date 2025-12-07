@@ -18,6 +18,7 @@ from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.authentication import SessionAuthentication
 from rest_framework.generics import ListAPIView, RetrieveAPIView
 
 from .models import Startup, Deck, FinancialProjection
@@ -25,9 +26,12 @@ from .serializers import (
     UserSerializer,
     DeckDetailSerializer,
     FinancialProjectionSerializer,
+    StartupViewSerializer,
+    RecordViewResponseSerializer,
 )
 import uuid
 import math
+from datetime import timedelta
 
 class StartupFinancialsView(APIView):
     def get(self, request, startup_id):
@@ -126,6 +130,8 @@ from .serializers import (
     FinancialProjectionSerializer,
     DeckDetailSerializer,
     DeckReportSerializer,
+    StartupViewSerializer,
+    RecordViewResponseSerializer,
 )
 
 def get_django_user_from_session(request):
@@ -643,6 +649,14 @@ class StartupListView(ListAPIView):
 class StartupDetailView(RetrieveAPIView):
     queryset = Startup.objects.all()
     serializer_class = StartupSerializer
+    authentication_classes = [JWTAuthentication, SessionAuthentication]
+    permission_classes = [AllowAny]
+
+    def retrieve(self, request, *args, **kwargs):
+        instance = self.get_object()
+        record_startup_view(request.user, instance, request=request)
+        serializer = self.get_serializer(instance)
+        return Response(serializer.data)
 
 class CurrentUserView(APIView):
     permission_classes = [IsAuthenticated]
@@ -931,13 +945,9 @@ class StartupProfileView(APIView):
         except Startup.DoesNotExist:
             return Response({'detail': 'Startup not found.'}, status=status.HTTP_404_NOT_FOUND)
 
-        # Track view if user is authenticated
-        if request.user.is_authenticated and startup.owner and request.user != startup.owner.user:
-            try:
-                ip_address = request.META.get('HTTP_X_FORWARDED_FOR', '').split(',')[0] or request.META.get('REMOTE_ADDR')
-                StartupView.objects.create(user=request.user, startup=startup, ip_address=ip_address)
-            except Exception as e:
-                print(f"Error tracking view: {e}")
+        record_result = record_startup_view(request.user, startup, request=request)
+        if record_result['status'] not in {'recorded', 'duplicate', 'owner_skipped', 'unauthenticated'}:
+            print(f"Unexpected view recording status for startup {startup.id}: {record_result['status']}")
 
         serializer = StartupSerializer(startup, context={'request': request})
         data = serializer.data
@@ -1022,6 +1032,67 @@ class FinancialProjectionListView(APIView):
         financials = FinancialProjection.objects.filter(deck=startup.source_deck).order_by('year')
         serializer = FinancialProjectionSerializer(financials, many=True)
         return Response(serializer.data)
+
+class RecordStartupViewAPI(APIView):
+    """API endpoint to record when a user views a startup profile"""
+    permission_classes = [IsAuthenticated]
+    authentication_classes = [JWTAuthentication, SessionAuthentication]
+    
+    def post(self, request, startup_id):
+        # Get startup or return 404
+        startup = get_object_or_404(Startup, pk=startup_id)
+
+        record_result = record_startup_view(request.user, startup, request=request)
+
+        # Determine response details based on record status
+        status_map = {
+            'recorded': (
+                'View recorded successfully',
+                status.HTTP_201_CREATED,
+                record_result['view'].viewed_at if record_result['view'] else timezone.now()
+            ),
+            'duplicate': (
+                'View already recorded recently',
+                status.HTTP_200_OK,
+                record_result['view'].viewed_at if record_result['view'] else timezone.now()
+            ),
+            'owner_skipped': (
+                'View not recorded (own startup)',
+                status.HTTP_200_OK,
+                timezone.now()
+            ),
+            'unauthenticated': (
+                'Authentication required',
+                status.HTTP_401_UNAUTHORIZED,
+                timezone.now()
+            ),
+            'error': (
+                'Failed to record view',
+                status.HTTP_500_INTERNAL_SERVER_ERROR,
+                timezone.now()
+            ),
+        }
+
+        message, response_status, viewed_at = status_map.get(
+            record_result['status'],
+            ('View status unknown', status.HTTP_400_BAD_REQUEST, timezone.now())
+        )
+
+        total_views = StartupView.objects.filter(startup=startup).count()
+        unique_viewers = StartupView.objects.filter(startup=startup).values('user').distinct().count()
+        
+        response_data = {
+            'message': message,
+            'startup_id': startup_id,
+            'company_name': startup.company_name,
+            'total_views': total_views,
+            'unique_viewers': unique_viewers,
+            'viewed_at': viewed_at
+        }
+        
+        serializer = RecordViewResponseSerializer(data=response_data)
+        serializer.is_valid(raise_exception=True)
+        return Response(serializer.data, status=response_status)
 
 class watchlist_view(APIView):
     def get(self, request):
@@ -1252,10 +1323,7 @@ class company_profile(APIView):
 
         startup = get_object_or_404(Startup, id=startup_id)
 
-        # Track view if not owner
-        if startup.owner and user != startup.owner.user:
-            ip_address = request.META.get('HTTP_X_FORWARDED_FOR', '').split(',')[0] or request.META.get('REMOTE_ADDR')
-            StartupView.objects.create(user=user, startup=startup, ip_address=ip_address)
+        record_startup_view(user, startup, request=request)
 
         is_in_watchlist = Watchlist.objects.filter(user=user, startup=startup).exists()
 
@@ -1406,8 +1474,6 @@ class startup_comparison(APIView):
 # Analytics helper functions
 def get_startup_analytics(startup):
     """Get view and comparison analytics for a startup"""
-    from datetime import timedelta
-    
     total_views = StartupView.objects.filter(startup=startup).count()
     unique_viewers = StartupView.objects.filter(startup=startup).values('user').distinct().count()
     
@@ -1446,6 +1512,47 @@ def get_startup_analytics(startup):
         'recent_comparisons': recent_comparisons,
         'recent_watchlist': recent_watchlist,
     }
+
+
+def record_startup_view(user, startup, request=None, dedupe_minutes=5, allow_owner=False):
+    """Utility to record a startup view with optional deduplication."""
+    if not user or not getattr(user, 'is_authenticated', False):
+        return {'status': 'unauthenticated', 'view': None}
+
+    is_owner = bool(startup.owner and startup.owner.user == user)
+    if is_owner and not allow_owner:
+        return {'status': 'owner_skipped', 'view': None}
+
+    cutoff = timezone.now() - timedelta(minutes=dedupe_minutes)
+    existing = (
+        StartupView.objects
+        .filter(user=user, startup=startup, viewed_at__gte=cutoff)
+        .order_by('-viewed_at')
+        .first()
+    )
+
+    if existing:
+        return {'status': 'duplicate', 'view': existing}
+
+    ip_address = None
+    if request is not None:
+        forwarded = request.META.get('HTTP_X_FORWARDED_FOR', '')
+        if forwarded:
+            ip_address = forwarded.split(',')[0].strip()
+        elif request.META.get('REMOTE_ADDR'):
+            ip_address = request.META.get('REMOTE_ADDR')
+
+    try:
+        view_record = StartupView.objects.create(
+            user=user,
+            startup=startup,
+            ip_address=ip_address
+        )
+    except Exception as exc:
+        print(f"Error recording startup view for startup {startup.id}: {exc}")
+        return {'status': 'error', 'view': None}
+
+    return {'status': 'recorded', 'view': view_record}
 
 def get_risk_color(confidence):
     """Helper function to get risk color class"""
@@ -2150,17 +2257,12 @@ class view_startup_report(APIView):
                 'detail': 'Startup not found or you do not have permission to access it.'
             }, status=status.HTTP_404_NOT_FOUND)
 
-        # ✅ Track view
-        try:
-            StartupView.objects.create(
-                user=request.user,
-                startup=startup,
-                viewed_at=timezone.now(),
-                ip_address=request.META.get('REMOTE_ADDR')
-            )
-        except Exception as e:
-            # Log error but don't fail the request
-            print(f"Error tracking startup view: {e}")
+        record_startup_view(
+            request.user,
+            startup,
+            request=request,
+            allow_owner=True
+        )
 
         # Return startup report data
         company_data = {

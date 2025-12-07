@@ -126,15 +126,20 @@ class StartupSerializer(serializers.ModelSerializer):
     owner_email = serializers.EmailField(source='owner.user.email', read_only=True)
     source_deck_id = serializers.IntegerField(source='source_deck.id', read_only=True)
 
-    contact_email = serializers.SerializerMethodField()
-    contact_phone = serializers.SerializerMethodField()
-    website_url = serializers.SerializerMethodField()
-    linkedin_url = serializers.SerializerMethodField()
-    location = serializers.SerializerMethodField()
-    founder_name = serializers.SerializerMethodField()
-    founder_title = serializers.SerializerMethodField()
-    founder_linkedin = serializers.SerializerMethodField()
-    year_founded = serializers.SerializerMethodField()
+    # Contact fields - writable via owner profile
+    contact_email = serializers.EmailField(required=False, allow_blank=True, allow_null=True)
+    contact_phone = serializers.CharField(required=False, allow_blank=True, allow_null=True, max_length=20)
+    website_url = serializers.URLField(required=False, allow_blank=True, allow_null=True)
+    linkedin_url = serializers.URLField(required=False, allow_blank=True, allow_null=True)
+    location = serializers.CharField(required=False, allow_blank=True, allow_null=True, max_length=255)
+    
+    # Founder fields - writable via owner profile
+    founder_name = serializers.CharField(required=False, allow_blank=True, allow_null=True, max_length=255)
+    founder_title = serializers.CharField(required=False, allow_blank=True, allow_null=True, max_length=100)
+    founder_linkedin = serializers.URLField(required=False, allow_blank=True, allow_null=True)
+    
+    # Company detail fields - writable via owner profile
+    year_founded = serializers.IntegerField(required=False, allow_null=True)
 
     risk_level = serializers.SerializerMethodField()
     risk_score = serializers.SerializerMethodField()
@@ -211,66 +216,84 @@ class StartupSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'owner_email', 'source_deck_id']
 
+    def to_representation(self, instance):
+        """
+        Override to populate owner fields when reading
+        """
+        representation = super().to_representation(instance)
+        
+        # Populate contact and founder fields from owner
+        if instance.owner:
+            representation['contact_email'] = instance.owner.contact_email
+            representation['contact_phone'] = instance.owner.contact_phone
+            representation['website_url'] = instance.owner.website_url
+            representation['linkedin_url'] = instance.owner.linkedin_url
+            representation['location'] = instance.owner.location
+            representation['founder_name'] = instance.owner.founder_name
+            representation['founder_title'] = instance.owner.founder_title
+            representation['founder_linkedin'] = instance.owner.founder_linkedin
+            representation['year_founded'] = instance.owner.year_founded
+        
+        return representation
+    
     def create(self, validated_data):
         """
         Override create to handle owner properly
         Owner should be passed via save(owner=...) not in validated_data
         """
-        return super().create(validated_data)
+        # Extract owner-related fields
+        owner_fields = {
+            'contact_email': validated_data.pop('contact_email', None),
+            'contact_phone': validated_data.pop('contact_phone', None),
+            'website_url': validated_data.pop('website_url', None),
+            'linkedin_url': validated_data.pop('linkedin_url', None),
+            'location': validated_data.pop('location', None),
+            'founder_name': validated_data.pop('founder_name', None),
+            'founder_title': validated_data.pop('founder_title', None),
+            'founder_linkedin': validated_data.pop('founder_linkedin', None),
+            'year_founded': validated_data.pop('year_founded', None),
+        }
+        
+        startup = super().create(validated_data)
+        
+        # Update owner profile if owner exists and any owner fields were provided
+        if startup.owner and any(v is not None for v in owner_fields.values()):
+            for field, value in owner_fields.items():
+                if value is not None:
+                    setattr(startup.owner, field, value)
+            startup.owner.save()
+        
+        return startup
     
-    def get_contact_email(self, obj):
-        """Get owner's contact email"""
-        if obj.owner:
-            return obj.owner.contact_email
-        return None
-    
-    def get_contact_phone(self, obj):
-        """Get owner's contact phone"""
-        if obj.owner:
-            return obj.owner.contact_phone
-        return None
-    
-    def get_website_url(self, obj):
-        """Get owner's website URL"""
-        if obj.owner:
-            return obj.owner.website_url
-        return None
-    
-    def get_linkedin_url(self, obj):
-        """Get owner's LinkedIn URL"""
-        if obj.owner:
-            return obj.owner.linkedin_url
-        return None
-    
-    def get_location(self, obj):
-        """Get owner's location"""
-        if obj.owner:
-            return obj.owner.location
-        return None
-    
-    def get_founder_name(self, obj):
-        """Get owner's founder name"""
-        if obj.owner:
-            return obj.owner.founder_name
-        return None
-    
-    def get_founder_title(self, obj):
-        """Get owner's founder title"""
-        if obj.owner:
-            return obj.owner.founder_title
-        return None
-    
-    def get_founder_linkedin(self, obj):
-        """Get owner's founder LinkedIn"""
-        if obj.owner:
-            return obj.owner.founder_linkedin
-        return None
-    
-    def get_year_founded(self, obj):
-        """Get owner's year founded"""
-        if obj.owner:
-            return obj.owner.year_founded
-        return None
+    def update(self, instance, validated_data):
+        """
+        Override update to handle owner-related fields
+        """
+        # Define owner field names
+        owner_field_names = [
+            'contact_email', 'contact_phone', 'website_url', 'linkedin_url', 
+            'location', 'founder_name', 'founder_title', 'founder_linkedin', 'year_founded'
+        ]
+        
+        # Extract owner-related fields from validated_data (only if present)
+        owner_fields = {}
+        for field_name in owner_field_names:
+            if field_name in validated_data:
+                owner_fields[field_name] = validated_data.pop(field_name)
+        
+        # Update the startup instance with remaining fields
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        
+        # Update owner profile if owner exists and there are owner fields to update
+        if instance.owner and owner_fields:
+            for field, value in owner_fields.items():
+                # Set the value, converting empty strings to None
+                setattr(instance.owner, field, value if value != '' else None)
+            instance.owner.save()
+        
+        return instance
 
     def get_tagline(self, obj):
         """Get tagline from source deck if this is a deck builder startup"""
@@ -700,3 +723,24 @@ class DeckReportSerializer(serializers.ModelSerializer):
             'amount': obj.ask.amount,
             'usage_description': obj.ask.usage_description
         } if obj.ask else {}
+
+
+class StartupViewSerializer(serializers.ModelSerializer):
+    """Serializer for recording startup views"""
+    company_name = serializers.CharField(source='startup.company_name', read_only=True)
+    viewer_email = serializers.EmailField(source='user.email', read_only=True)
+    
+    class Meta:
+        model = StartupView
+        fields = ['id', 'viewer_email', 'company_name', 'viewed_at', 'ip_address']
+        read_only_fields = ['id', 'viewer_email', 'company_name', 'viewed_at', 'ip_address']
+
+
+class RecordViewResponseSerializer(serializers.Serializer):
+    """Serializer for view recording response"""
+    message = serializers.CharField()
+    startup_id = serializers.IntegerField()
+    company_name = serializers.CharField()
+    total_views = serializers.IntegerField()
+    unique_viewers = serializers.IntegerField()
+    viewed_at = serializers.DateTimeField()

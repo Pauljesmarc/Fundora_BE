@@ -12,7 +12,7 @@ from django.utils.decorators import method_decorator
 from django.views.decorators.http import require_POST
 from django.forms import ValidationError, inlineformset_factory
 from django.db import transaction
-from django.db.models import F, Value, FloatField, ExpressionWrapper, Case, When, Prefetch
+from django.db.models import Value, FloatField, Case, When, Prefetch
 
 from rest_framework import status
 from rest_framework.views import APIView
@@ -27,7 +27,6 @@ from .serializers import (
     FinancialProjectionSerializer,
 )
 import uuid
-import random
 import math
 
 class StartupFinancialsView(APIView):
@@ -919,30 +918,94 @@ class StartupProfileView(APIView):
 
     def get(self, request, startup_id):
         try:
-            startup = Startup.objects.select_related("source_deck").get(pk=startup_id)
+            startup = Startup.objects.select_related(
+                'owner__user', 
+                'source_deck__problem',
+                'source_deck__solution', 
+                'source_deck__market_analysis',
+                'source_deck__ask'
+            ).prefetch_related(
+                'source_deck__team_members',
+                'source_deck__financials'
+            ).get(pk=startup_id)
         except Startup.DoesNotExist:
-            return Response({"detail": "Startup not found."}, status=404)
+            return Response({'detail': 'Startup not found.'}, status=status.HTTP_404_NOT_FOUND)
 
-        deck = startup.source_deck
-        if not deck:
-            return Response({"detail": "No pitch deck linked to this startup."}, status=404)
+        # Track view if user is authenticated
+        if request.user.is_authenticated and startup.owner and request.user != startup.owner.user:
+            try:
+                ip_address = request.META.get('HTTP_X_FORWARDED_FOR', '').split(',')[0] or request.META.get('REMOTE_ADDR')
+                StartupView.objects.create(user=request.user, startup=startup, ip_address=ip_address)
+            except Exception as e:
+                print(f"Error tracking view: {e}")
 
-        serialized = DeckDetailSerializer(deck).data
-        response = {
-            "company_name": deck.company_name,
-            "company_description": deck.tagline or "",
-            "problem": serialized.get("problem", {}).get("description"),
-            "solution": serialized.get("solution", {}).get("description"),
-            "primary_market": serialized.get("market_analysis", {}).get("primary_market"),
-            "target_audience": serialized.get("market_analysis", {}).get("target_audience"),
-            "market_growth": serialized.get("market_analysis", {}).get("market_growth_rate"),
-            "competitive_advantage": serialized.get("market_analysis", {}).get("competitive_advantage"),
-            "financials": serialized.get("financials", []),
-            "funding_goal": serialized.get("ask", {}).get("amount"),
-            "use_of_funds": serialized.get("ask", {}).get("usage_description"),
-            "is_in_watchlist": False,
-        }
-        return Response(response)
+        serializer = StartupSerializer(startup, context={'request': request})
+        data = serializer.data
+        
+        # If this is a deck-builder startup, add deck details
+        if startup.source_deck:
+            deck = startup.source_deck
+            data['report_type'] = 'deck'
+            data['deck_info'] = {
+                'company_name': deck.company_name,
+                'tagline': deck.tagline
+            }
+            
+            # Problem section
+            if hasattr(deck, 'problem'):
+                data['problem'] = {
+                    'description': deck.problem.description
+                }
+            else:
+                data['problem'] = None
+            
+            # Solution section
+            if hasattr(deck, 'solution'):
+                data['solution'] = {
+                    'description': deck.solution.description
+                }
+            else:
+                data['solution'] = None
+            
+            # Market Analysis section
+            if hasattr(deck, 'market_analysis'):
+                data['market_analysis'] = {
+                    'primary_market': deck.market_analysis.primary_market,
+                    'target_audience': deck.market_analysis.target_audience,
+                    'market_growth_rate': float(deck.market_analysis.market_growth_rate),
+                    'competitive_advantage': deck.market_analysis.competitive_advantage
+                }
+            else:
+                data['market_analysis'] = None
+            
+            # Funding Ask section
+            if hasattr(deck, 'ask'):
+                data['ask'] = {
+                    'amount': float(deck.ask.amount),
+                    'usage_description': deck.ask.usage_description
+                }
+            else:
+                data['ask'] = None
+            
+            # Team Members
+            data['team_members'] = [
+                {'name': member.name, 'title': member.title} 
+                for member in deck.team_members.all()
+            ]
+            
+            # Financial Projections
+            data['financials'] = [
+                {
+                    'year': f.year, 
+                    'revenue': float(f.revenue), 
+                    'profit': float(f.profit)
+                }
+                for f in deck.financials.order_by('year')
+            ]
+        else:
+            data['report_type'] = 'regular'
+        
+        return Response(data, status=status.HTTP_200_OK)
 
 class FinancialProjectionListView(APIView):
     permission_classes = [AllowAny]
@@ -951,12 +1014,12 @@ class FinancialProjectionListView(APIView):
         try:
             startup = Startup.objects.select_related("source_deck").get(pk=startup_id)
         except Startup.DoesNotExist:
-            return Response([], status=200)
+            return Response([], status=status.HTTP_200_OK)
 
         if not startup.source_deck:
-            return Response([], status=200)
+            return Response([], status=status.HTTP_200_OK)
 
-        financials = FinancialProjection.objects.filter(deck=startup.source_deck)
+        financials = FinancialProjection.objects.filter(deck=startup.source_deck).order_by('year')
         serializer = FinancialProjectionSerializer(financials, many=True)
         return Response(serializer.data)
 

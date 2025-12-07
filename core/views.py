@@ -679,13 +679,14 @@ class ProfileView(APIView):
             label = registered_user.label
         except RegisteredUser.DoesNotExist:
             label = None
+            registered_user = None
         
         # Get counts
         watchlist_count = Watchlist.objects.filter(user=user).count()
         views_count = StartupView.objects.filter(user=user).count()
         comparisons_count = ComparisonSet.objects.filter(user=user).count()
         
-        # Get recent views (last 5)
+        # Get recent views
         recent_views = StartupView.objects.filter(user=user).select_related('startup').order_by('-viewed_at')[:5]
         recent_views_data = [
             {
@@ -696,7 +697,7 @@ class ProfileView(APIView):
             for view in recent_views
         ]
         
-        # Get recent comparisons (last 5)
+        # Get recent comparisons
         recent_comparisons = ComparisonSet.objects.filter(user=user).prefetch_related('startups').order_by('-created_at')[:5]
         recent_comparisons_data = [
             {
@@ -718,7 +719,8 @@ class ProfileView(APIView):
             for dl in downloads
         ]
         
-        return Response({
+        # Build response with contact/founder info
+        response_data = {
             'first_name': user.first_name,
             'last_name': user.last_name,
             'email': user.email,
@@ -729,7 +731,24 @@ class ProfileView(APIView):
             'recent_views': recent_views_data,
             'recent_comparisons': recent_comparisons_data,
             'downloads': downloads_data
-        })
+        }
+        
+        # Add RegisteredUser fields if available
+        if registered_user:
+            response_data.update({
+                'contact_email': registered_user.contact_email,
+                'contact_phone': registered_user.contact_phone,
+                'website_url': registered_user.website_url,
+                'linkedin_url': registered_user.linkedin_url,
+                'location': registered_user.location,
+                'founder_name': registered_user.founder_name,
+                'founder_title': registered_user.founder_title,
+                'founder_linkedin': registered_user.founder_linkedin,
+                'year_founded': registered_user.year_founded
+            })
+        
+        return Response(response_data)
+
 
 class UpdateProfileView(APIView):
     permission_classes = [IsAuthenticated]
@@ -738,30 +757,48 @@ class UpdateProfileView(APIView):
         user = request.user
         data = request.data
         
-        # Validate email uniqueness (if changed)
-        new_email = data.get('email')
-        if new_email and new_email != user.email:
-            if User.objects.filter(email=new_email).exists():
-                return Response(
-                    {'error': 'Email is already in use'},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-        
-        # Update user fields
+        # Update User model fields
         user.first_name = data.get('first_name', user.first_name)
         user.last_name = data.get('last_name', user.last_name)
-        
-        if new_email:
-            user.email = new_email
-            user.username = new_email  # Update username too if it's based on email
-        
         user.save()
+        
+        # Get or create RegisteredUser
+        try:
+            registered_user = RegisteredUser.objects.get(user=user)
+        except RegisteredUser.DoesNotExist:
+            registered_user = RegisteredUser.objects.create(user=user)
+        
+        # Update RegisteredUser fields
+        registered_user.contact_email = data.get('contact_email', registered_user.contact_email)
+        registered_user.contact_phone = data.get('contact_phone', registered_user.contact_phone)
+        registered_user.website_url = data.get('website_url', registered_user.website_url)
+        registered_user.linkedin_url = data.get('linkedin_url', registered_user.linkedin_url)
+        registered_user.location = data.get('location', registered_user.location)
+        registered_user.founder_name = data.get('founder_name', registered_user.founder_name)
+        registered_user.founder_title = data.get('founder_title', registered_user.founder_title)
+        registered_user.founder_linkedin = data.get('founder_linkedin', registered_user.founder_linkedin)
+        
+        # Handle year_founded
+        year_founded = data.get('year_founded')
+        if year_founded is not None:
+            registered_user.year_founded = year_founded
+        
+        registered_user.save()
         
         return Response({
             'message': 'Profile updated successfully',
             'first_name': user.first_name,
             'last_name': user.last_name,
-            'email': user.email
+            'email': user.email,
+            'contact_email': registered_user.contact_email,
+            'contact_phone': registered_user.contact_phone,
+            'website_url': registered_user.website_url,
+            'linkedin_url': registered_user.linkedin_url,
+            'location': registered_user.location,
+            'founder_name': registered_user.founder_name,
+            'founder_title': registered_user.founder_title,
+            'founder_linkedin': registered_user.founder_linkedin,
+            'year_founded': registered_user.year_founded
         })
     
 class StartupProfileAccountView(APIView):

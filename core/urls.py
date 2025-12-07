@@ -5,7 +5,8 @@ from .views import (
     StartupDetailView, 
     CurrentUserView, 
     StartupProfileView, 
-    FinancialProjectionListView
+    FinancialProjectionListView,
+    UpdateStartupProfileView
 )
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -56,7 +57,6 @@ urlpatterns = [
     path('startup/<int:startup_id>/', views.startup_detail.as_view(), name='startup_detail'),
     path('startup/<int:startup_id>/update/', views.startup_detail.as_view(), name='startup_update'),
 
-
     path('startup/company-info/', views.company_information_form.as_view(), name='company_information_form'),
     path('startup/health-report/', views.health_report_page.as_view(), name='health_report_page'),
     path('startup/add/', views.add_startup, name='add_startup'),
@@ -104,6 +104,9 @@ urlpatterns = [
 
     # Projection
     path('deck-builder/pitch-financials/', views.save_pitch_deck_financials.as_view(), name='save_pitch_financials'),
+
+    #Starutp Account Update
+    path('startup/profile/update/', UpdateStartupProfileView.as_view(), name='update_startup_profile'),
 
     path('test/', TestAPI.as_view(), name='test-api'),
 ]

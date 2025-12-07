@@ -679,13 +679,14 @@ class ProfileView(APIView):
             label = registered_user.label
         except RegisteredUser.DoesNotExist:
             label = None
+            registered_user = None
         
         # Get counts
         watchlist_count = Watchlist.objects.filter(user=user).count()
         views_count = StartupView.objects.filter(user=user).count()
         comparisons_count = ComparisonSet.objects.filter(user=user).count()
         
-        # Get recent views (last 5)
+        # Get recent views
         recent_views = StartupView.objects.filter(user=user).select_related('startup').order_by('-viewed_at')[:5]
         recent_views_data = [
             {
@@ -696,7 +697,7 @@ class ProfileView(APIView):
             for view in recent_views
         ]
         
-        # Get recent comparisons (last 5)
+        # Get recent comparisons
         recent_comparisons = ComparisonSet.objects.filter(user=user).prefetch_related('startups').order_by('-created_at')[:5]
         recent_comparisons_data = [
             {
@@ -718,7 +719,8 @@ class ProfileView(APIView):
             for dl in downloads
         ]
         
-        return Response({
+        # Build response with contact/founder info
+        response_data = {
             'first_name': user.first_name,
             'last_name': user.last_name,
             'email': user.email,
@@ -729,7 +731,24 @@ class ProfileView(APIView):
             'recent_views': recent_views_data,
             'recent_comparisons': recent_comparisons_data,
             'downloads': downloads_data
-        })
+        }
+        
+        # Add RegisteredUser fields if available
+        if registered_user:
+            response_data.update({
+                'contact_email': registered_user.contact_email,
+                'contact_phone': registered_user.contact_phone,
+                'website_url': registered_user.website_url,
+                'linkedin_url': registered_user.linkedin_url,
+                'location': registered_user.location,
+                'founder_name': registered_user.founder_name,
+                'founder_title': registered_user.founder_title,
+                'founder_linkedin': registered_user.founder_linkedin,
+                'year_founded': registered_user.year_founded
+            })
+        
+        return Response(response_data)
+
 
 class UpdateProfileView(APIView):
     permission_classes = [IsAuthenticated]
@@ -738,30 +757,48 @@ class UpdateProfileView(APIView):
         user = request.user
         data = request.data
         
-        # Validate email uniqueness (if changed)
-        new_email = data.get('email')
-        if new_email and new_email != user.email:
-            if User.objects.filter(email=new_email).exists():
-                return Response(
-                    {'error': 'Email is already in use'},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-        
-        # Update user fields
+        # Update User model fields
         user.first_name = data.get('first_name', user.first_name)
         user.last_name = data.get('last_name', user.last_name)
-        
-        if new_email:
-            user.email = new_email
-            user.username = new_email  # Update username too if it's based on email
-        
         user.save()
+        
+        # Get or create RegisteredUser
+        try:
+            registered_user = RegisteredUser.objects.get(user=user)
+        except RegisteredUser.DoesNotExist:
+            registered_user = RegisteredUser.objects.create(user=user)
+        
+        # Update RegisteredUser fields
+        registered_user.contact_email = data.get('contact_email', registered_user.contact_email)
+        registered_user.contact_phone = data.get('contact_phone', registered_user.contact_phone)
+        registered_user.website_url = data.get('website_url', registered_user.website_url)
+        registered_user.linkedin_url = data.get('linkedin_url', registered_user.linkedin_url)
+        registered_user.location = data.get('location', registered_user.location)
+        registered_user.founder_name = data.get('founder_name', registered_user.founder_name)
+        registered_user.founder_title = data.get('founder_title', registered_user.founder_title)
+        registered_user.founder_linkedin = data.get('founder_linkedin', registered_user.founder_linkedin)
+        
+        # Handle year_founded
+        year_founded = data.get('year_founded')
+        if year_founded is not None:
+            registered_user.year_founded = year_founded
+        
+        registered_user.save()
         
         return Response({
             'message': 'Profile updated successfully',
             'first_name': user.first_name,
             'last_name': user.last_name,
-            'email': user.email
+            'email': user.email,
+            'contact_email': registered_user.contact_email,
+            'contact_phone': registered_user.contact_phone,
+            'website_url': registered_user.website_url,
+            'linkedin_url': registered_user.linkedin_url,
+            'location': registered_user.location,
+            'founder_name': registered_user.founder_name,
+            'founder_title': registered_user.founder_title,
+            'founder_linkedin': registered_user.founder_linkedin,
+            'year_founded': registered_user.year_founded
         })
     
 class StartupProfileAccountView(APIView):
@@ -808,7 +845,7 @@ class StartupProfileAccountView(APIView):
                 'created_at': startup.created_at.isoformat(),
                 'is_deck_builder': startup.is_deck_builder
             }
-            for startup in startups[:10]  # Limit to 10 most recent
+            for startup in startups[:10]
         ]
         
         # Prepare decks data
@@ -819,13 +856,12 @@ class StartupProfileAccountView(APIView):
                 'tagline': deck.tagline,
                 'created_at': deck.created_at.isoformat()
             }
-            for deck in decks[:10]  # Limit to 10 most recent
+            for deck in decks[:10]
         ]
         
         # Get recent activity
         recent_activity = []
         
-        # Add recent startup registrations
         for startup in startups[:5]:
             recent_activity.append({
                 'type': 'startup',
@@ -833,7 +869,6 @@ class StartupProfileAccountView(APIView):
                 'timestamp': startup.created_at.isoformat()
             })
         
-        # Add recent deck creations
         for deck in decks[:5]:
             recent_activity.append({
                 'type': 'deck',
@@ -841,7 +876,6 @@ class StartupProfileAccountView(APIView):
                 'timestamp': deck.created_at.isoformat()
             })
         
-        # Add recent views on their startups
         recent_views = StartupView.objects.filter(
             startup__owner=registered_user
         ).select_related('startup', 'user').order_by('-viewed_at')[:5]
@@ -853,9 +887,8 @@ class StartupProfileAccountView(APIView):
                 'timestamp': view.viewed_at.isoformat()
             })
         
-        # Sort activity by timestamp (most recent first)
         recent_activity.sort(key=lambda x: x['timestamp'], reverse=True)
-        recent_activity = recent_activity[:15]  # Limit to 15 most recent activities
+        recent_activity = recent_activity[:15]
         
         return Response({
             'first_name': user.first_name,
@@ -867,8 +900,56 @@ class StartupProfileAccountView(APIView):
             'views_count': views_count,
             'startups': startups_data,
             'decks': decks_data,
-            'recent_activity': recent_activity
+            'recent_activity': recent_activity,
+            'contact_email': registered_user.contact_email or '',
+            'contact_phone': registered_user.contact_phone or '',
+            'website_url': registered_user.website_url or '',
+            'linkedin_url': registered_user.linkedin_url or '',
+            'location': registered_user.location or '',
+            'founder_name': registered_user.founder_name or '',
+            'founder_title': registered_user.founder_title or '',
+            'founder_linkedin': registered_user.founder_linkedin or '',
         })
+    
+class UpdateStartupProfileView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    def put(self, request):
+        user = request.user
+        
+        try:
+            registered_user = RegisteredUser.objects.get(user=user)
+            
+            if registered_user.label != 'startup':
+                return Response({
+                    'error': 'This endpoint is only accessible to startup users.'
+                }, status=status.HTTP_403_FORBIDDEN)
+            
+            # Update user fields
+            user.first_name = request.data.get('first_name', user.first_name)
+            user.last_name = request.data.get('last_name', user.last_name)
+            user.save()
+            
+            # Update RegisteredUser contact fields
+            registered_user.contact_email = request.data.get('contact_email', registered_user.contact_email)
+            registered_user.contact_phone = request.data.get('contact_phone', registered_user.contact_phone)
+            registered_user.website_url = request.data.get('website_url', registered_user.website_url)
+            registered_user.linkedin_url = request.data.get('linkedin_url', registered_user.linkedin_url)
+            registered_user.location = request.data.get('location', registered_user.location)
+            registered_user.founder_name = request.data.get('founder_name', registered_user.founder_name)
+            registered_user.founder_title = request.data.get('founder_title', registered_user.founder_title)
+            registered_user.founder_linkedin = request.data.get('founder_linkedin', registered_user.founder_linkedin)
+            registered_user.save()
+            
+            return Response({
+                'success': True,
+                'message': 'Profile updated successfully'
+            }, status=status.HTTP_200_OK)
+            
+        except RegisteredUser.DoesNotExist:
+            return Response({
+                'error': 'User profile not found.'
+            }, status=status.HTTP_404_NOT_FOUND)
     
 class StartupProfileView(APIView):
     permission_classes = [AllowAny]
@@ -1146,41 +1227,49 @@ class company_profile(APIView):
         startup = get_object_or_404(Startup, id=startup_id)
 
         # Track view if not owner
-        if startup.owner and user != startup.owner.user:  # Fixed: startup.owner is RegisteredUser, not User
+        if startup.owner and user != startup.owner.user:
             ip_address = request.META.get('HTTP_X_FORWARDED_FOR', '').split(',')[0] or request.META.get('REMOTE_ADDR')
             StartupView.objects.create(user=user, startup=startup, ip_address=ip_address)
 
         is_in_watchlist = Watchlist.objects.filter(user=user, startup=startup).exists()
 
-        # Use serializer for all startups (deck-builder or regular)
+        # Use serializer for the startup
         serializer = StartupSerializer(startup, context={'request': request})
         startup_data = serializer.data
         startup_data['is_in_watchlist'] = is_in_watchlist
-
-        # Add deck details if this is a deck-builder startup
+        
+        # If this is a deck-builder startup, add deck details
         if startup.source_deck:
             deck = startup.source_deck
-            startup_data['deck'] = {
-                "problem": {"description": deck.problem.description} if hasattr(deck, 'problem') else None,
-                "solution": {"description": deck.solution.description} if hasattr(deck, 'solution') else None,
-                "market_analysis": {
-                    "primary_market": deck.market_analysis.primary_market,
-                    "target_audience": deck.market_analysis.target_audience,
-                    "market_growth_rate": float(deck.market_analysis.market_growth_rate),
-                    "competitive_advantage": deck.market_analysis.competitive_advantage
-                } if hasattr(deck, 'market_analysis') else None,
-                "ask": {
-                    "amount": float(deck.ask.amount),
-                    "usage_description": deck.ask.usage_description
-                } if hasattr(deck, 'ask') else None,
-                "team_members": [{"name": member.name, "title": member.title} for member in deck.team_members.all()],
-                "financials": [
-                    {"year": f.year, "revenue": float(f.revenue), "profit": float(f.profit)}
-                    for f in deck.financials.order_by('year')
-                ]
+            startup_data['report_type'] = 'deck'
+            startup_data['deck_info'] = {
+                'company_name': deck.company_name,
+                'tagline': deck.tagline
             }
-            startup_data['show_modal'] = True
-            startup_data['from_dashboard'] = True
+            startup_data['problem'] = {
+                'description': deck.problem.description
+            } if hasattr(deck, 'problem') else None
+            startup_data['solution'] = {
+                'description': deck.solution.description
+            } if hasattr(deck, 'solution') else None
+            startup_data['market_analysis'] = {
+                'primary_market': deck.market_analysis.primary_market,
+                'target_audience': deck.market_analysis.target_audience,
+                'market_growth_rate': float(deck.market_analysis.market_growth_rate),
+                'competitive_advantage': deck.market_analysis.competitive_advantage
+            } if hasattr(deck, 'market_analysis') else None
+            startup_data['ask'] = {
+                'amount': float(deck.ask.amount),
+                'usage_description': deck.ask.usage_description
+            } if hasattr(deck, 'ask') else None
+            startup_data['team_members'] = [
+                {'name': member.name, 'title': member.title} 
+                for member in deck.team_members.all()
+            ]
+            startup_data['financials'] = [
+                {'year': f.year, 'revenue': float(f.revenue), 'profit': float(f.profit)}
+                for f in deck.financials.order_by('year')
+            ]
 
         return Response(startup_data, status=status.HTTP_200_OK)
 
@@ -1681,13 +1770,19 @@ class company_information_form(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        startup_user_id = request.session.get('startup_user_id')
-        user_label = request.session.get('user_label')
-
-        if not startup_user_id or user_label != 'startup':
+        user = request.user
+        
+        try:
+            registered_user = RegisteredUser.objects.get(user=user)
+            
+            if registered_user.label != 'startup':
+                return Response({
+                    'error': 'Only startup users can submit company information.'
+                }, status=status.HTTP_403_FORBIDDEN)
+        except RegisteredUser.DoesNotExist:
             return Response({
-                'error': 'Please log in as a startup to access this endpoint.'
-            }, status=403)
+                'error': 'User profile not found.'
+            }, status=status.HTTP_404_NOT_FOUND)
 
         data = request.data
 
@@ -1700,64 +1795,71 @@ class company_information_form(APIView):
             except (ValueError, TypeError):
                 return None
 
-        company_data = {
-            # Basic Information
-            'company_name': data.get('company_name', '').strip(),
-            'industry': data.get('industry', '').strip(),
-            'company_description': data.get('company_description', '').strip(),
-            
-            # Financial Data - Income Statement
-            'time_between_periods': parse_numeric(data.get('time_between_periods')),
-            'previous_revenue': parse_numeric(data.get('previous_revenue')),
-            'current_revenue': parse_numeric(data.get('current_revenue')),
-            'revenue': parse_numeric(data.get('revenue')),  # Duplicate field for compatibility
-            'net_income': parse_numeric(data.get('net_income')),
-            'ebit': parse_numeric(data.get('ebit')),
-            
-            # Financial Data - Balance Sheet
-            'total_assets': parse_numeric(data.get('total_assets')),
-            'current_assets': parse_numeric(data.get('current_assets')),
-            'total_liabilities': parse_numeric(data.get('total_liabilities')),
-            'current_liabilities': parse_numeric(data.get('current_liabilities')),
-            'retained_earnings': parse_numeric(data.get('retained_earnings')),
-            'shareholder_equity': parse_numeric(data.get('shareholder_equity')),
-            'working_capital': parse_numeric(data.get('working_capital')),
-            
-            # Financial Data - Cash Flow
-            'cash_flow': parse_numeric(data.get('cash_flow')),
-            
-            # Qualitative Assessment
-            'team_strength': data.get('team_strength', '').strip(),
-            'market_position': data.get('market_position', '').strip(),
-            'brand_reputation': data.get('brand_reputation', '').strip(),
-            
-            # Confidence Metrics
-            'data_source_confidence': data.get('data_source_confidence', 'Medium').strip(),
-            'confidence_percentage': parse_numeric(data.get('confidence_percentage')),
-        }
-
         # Validate required fields
-        if not company_data['company_name'] or not company_data['industry']:
+        if not data.get('company_name') or not data.get('industry'):
             return Response({
                 'success': False,
                 'error': 'Company name and industry are required fields.',
                 'errors': {
-                    'company_name': ['This field is required.'] if not company_data['company_name'] else [],
-                    'industry': ['This field is required.'] if not company_data['industry'] else []
+                    'company_name': ['This field is required.'] if not data.get('company_name') else [],
+                    'industry': ['This field is required.'] if not data.get('industry') else []
                 }
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        # Store in session
-        request.session['company_data'] = company_data
-        request.session.modified = True
+        # Create the startup with financial data
+        startup = Startup.objects.create(
+            owner=registered_user,
+            company_name=data.get('company_name', '').strip(),
+            industry=data.get('industry', '').strip(),
+            company_description=data.get('company_description', '').strip(),
+            
+            # Financial Data
+            time_between_periods=parse_numeric(data.get('time_between_periods')),
+            previous_revenue=parse_numeric(data.get('previous_revenue')),
+            current_revenue=parse_numeric(data.get('current_revenue')),
+            revenue=parse_numeric(data.get('current_revenue')),
+            net_income=parse_numeric(data.get('net_income')),
+            ebit=parse_numeric(data.get('ebit')),
+            total_assets=parse_numeric(data.get('total_assets')),
+            current_assets=parse_numeric(data.get('current_assets')),
+            total_liabilities=parse_numeric(data.get('total_liabilities')),
+            current_liabilities=parse_numeric(data.get('current_liabilities')),
+            retained_earnings=parse_numeric(data.get('retained_earnings')),
+            shareholder_equity=parse_numeric(data.get('shareholder_equity')),
+            cash_flow=parse_numeric(data.get('cash_flow')),
+            current_valuation=parse_numeric(data.get('current_valuation')),
+            expected_future_valuation=parse_numeric(data.get('expected_future_valuation')),
+            years_to_future_valuation=parse_numeric(data.get('years_to_future_valuation')),
+            
+            # Qualitative Data
+            team_strength=data.get('team_strength', '').strip(),
+            market_position=data.get('market_position', '').strip(),
+            brand_reputation=data.get('brand_reputation', '').strip(),
+            
+            # Inherit contact and founder info from user profile
+            contact_email=registered_user.contact_email,
+            contact_phone=registered_user.contact_phone,
+            website_url=registered_user.website_url,
+            linkedin_url=registered_user.linkedin_url,
+            location=registered_user.location,
+            founder_name=registered_user.founder_name,
+            founder_title=registered_user.founder_title,
+            founder_linkedin=registered_user.founder_linkedin,
+            
+            # Year founded
+            year_founded=parse_numeric(data.get('year_founded')),
+            
+            # Confidence Metrics
+            data_source_confidence=data.get('data_source_confidence', 'Medium').strip(),
+            confidence_percentage=int(parse_numeric(data.get('confidence_percentage')) or 50),
+        )
 
         return Response({
             'success': True,
             'message': 'Company information saved successfully.',
-            'startup_id': startup_user_id,
-            'data': company_data,
-            'next_step': 'health_report_page'
-        }, status=status.HTTP_200_OK)
+            'startup_id': startup.id,
+            'company_name': startup.company_name
+        }, status=status.HTTP_201_CREATED)
 
 class health_report_page(APIView):
     permission_classes = [IsAuthenticated]

@@ -78,6 +78,35 @@ class LoginSerializer(serializers.Serializer):
 
         attrs['user'] = user
         return attrs
+    
+class RegisteredUserProfileSerializer(serializers.ModelSerializer):
+    email = serializers.EmailField(source='user.email', read_only=True)
+    first_name = serializers.CharField(source='user.first_name')
+    last_name = serializers.CharField(source='user.last_name')
+    
+    class Meta:
+        model = RegisteredUser
+        fields = [
+            'email', 'first_name', 'last_name',
+            'contact_email', 'contact_phone', 'website_url', 'linkedin_url', 'location',
+            'founder_name', 'founder_title', 'founder_linkedin'
+        ]
+    
+    def update(self, instance, validated_data):
+        # Update User fields
+        user_data = validated_data.pop('user', {})
+        if 'first_name' in user_data:
+            instance.user.first_name = user_data['first_name']
+        if 'last_name' in user_data:
+            instance.user.last_name = user_data['last_name']
+        instance.user.save()
+        
+        # Update RegisteredUser fields
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        
+        return instance
 
 class DeckSerializer(serializers.ModelSerializer):
     class Meta:
@@ -96,6 +125,16 @@ class UserSerializer(serializers.ModelSerializer):
 class StartupSerializer(serializers.ModelSerializer):
     owner_email = serializers.EmailField(source='owner.user.email', read_only=True)
     source_deck_id = serializers.IntegerField(source='source_deck.id', read_only=True)
+
+    contact_email = serializers.SerializerMethodField()
+    contact_phone = serializers.SerializerMethodField()
+    website_url = serializers.SerializerMethodField()
+    linkedin_url = serializers.SerializerMethodField()
+    location = serializers.SerializerMethodField()
+    founder_name = serializers.SerializerMethodField()
+    founder_title = serializers.SerializerMethodField()
+    founder_linkedin = serializers.SerializerMethodField()
+    year_founded = serializers.SerializerMethodField()
 
     risk_level = serializers.SerializerMethodField()
     risk_score = serializers.SerializerMethodField()
@@ -178,6 +217,60 @@ class StartupSerializer(serializers.ModelSerializer):
         Owner should be passed via save(owner=...) not in validated_data
         """
         return super().create(validated_data)
+    
+    def get_contact_email(self, obj):
+        """Get owner's contact email"""
+        if obj.owner:
+            return obj.owner.contact_email
+        return None
+    
+    def get_contact_phone(self, obj):
+        """Get owner's contact phone"""
+        if obj.owner:
+            return obj.owner.contact_phone
+        return None
+    
+    def get_website_url(self, obj):
+        """Get owner's website URL"""
+        if obj.owner:
+            return obj.owner.website_url
+        return None
+    
+    def get_linkedin_url(self, obj):
+        """Get owner's LinkedIn URL"""
+        if obj.owner:
+            return obj.owner.linkedin_url
+        return None
+    
+    def get_location(self, obj):
+        """Get owner's location"""
+        if obj.owner:
+            return obj.owner.location
+        return None
+    
+    def get_founder_name(self, obj):
+        """Get owner's founder name"""
+        if obj.owner:
+            return obj.owner.founder_name
+        return None
+    
+    def get_founder_title(self, obj):
+        """Get owner's founder title"""
+        if obj.owner:
+            return obj.owner.founder_title
+        return None
+    
+    def get_founder_linkedin(self, obj):
+        """Get owner's founder LinkedIn"""
+        if obj.owner:
+            return obj.owner.founder_linkedin
+        return None
+    
+    def get_year_founded(self, obj):
+        """Get owner's year founded"""
+        if obj.owner:
+            return obj.owner.year_founded
+        return None
 
     def get_tagline(self, obj):
         """Get tagline from source deck if this is a deck builder startup"""

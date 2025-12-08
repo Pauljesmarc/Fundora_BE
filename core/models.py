@@ -243,6 +243,14 @@ class StartupView(models.Model):
     
     class Meta:
         ordering = ['-viewed_at']
+        indexes = [
+            # Index for deduplication queries (user + startup + recent views)
+            models.Index(fields=['user', 'startup', '-viewed_at'], name='view_dedup_idx'),
+            # Index for startup analytics queries (total views per startup)
+            models.Index(fields=['startup', '-viewed_at'], name='startup_views_idx'),
+            # Index for user activity queries (user's view history)
+            models.Index(fields=['user', '-viewed_at'], name='user_views_idx'),
+        ]
     
     def __str__(self):
         return f"{self.user.email} viewed {self.startup.company_name} on {self.viewed_at.date()}"
@@ -256,6 +264,16 @@ class StartupComparison(models.Model):
     
     class Meta:
         ordering = ['-compared_at']
+        indexes = [
+            # Index for user's comparison history
+            models.Index(fields=['user', '-compared_at'], name='user_comp_idx'),
+            # Index for startup comparison analytics
+            models.Index(fields=['startup', '-compared_at'], name='startup_comp_idx'),
+            # Index for comparison set queries
+            models.Index(fields=['comparison_set_id', '-compared_at'], name='compset_idx'),
+            # Composite index for deduplication checks
+            models.Index(fields=['user', 'startup', '-compared_at'], name='comp_dedup_idx'),
+        ]
     
     def __str__(self):
         return f"{self.user.email} compared {self.startup.company_name} on {self.compared_at.date()}"

@@ -1102,97 +1102,159 @@ class RecordStartupComparisonAPI(APIView):
     permission_classes = [IsAuthenticated]
     authentication_classes = [JWTAuthentication, SessionAuthentication]
     
-    def post(self, request):
-        # Get startup IDs from request
-        startup_ids = request.data.get('startup_ids', [])
+    def post(self, request, *args, **kwargs):
+        """
+        Record a startup comparison and update analytics.
         
-        if not startup_ids or not isinstance(startup_ids, list):
-            return Response(
-                {'detail': 'startup_ids must be a non-empty list'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+        Request body:
+            {
+                "startup_ids": [1, 2, 3]  // List of startup IDs being compared
+            }
         
-        if len(startup_ids) < 2:
-            return Response(
-                {'detail': 'At least 2 startups required for comparison'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        # Fetch startups
-        startups = []
-        for startup_id in startup_ids:
-            try:
-                startup = Startup.objects.get(pk=startup_id)
-                startups.append(startup)
-            except Startup.DoesNotExist:
+        Returns:
+            {
+                "message": "Comparison recorded successfully",
+                "startup_ids": [1, 2, 3],
+                "comparison_set_id": "uuid-string",
+                "total_comparisons": {"1": 5, "2": 3, "3": 7},
+                "unique_comparers": {"1": 3, "2": 2, "3": 4},
+                "compared_at": "2025-12-08T10:30:00Z"
+            }
+        """
+        try:
+            # Get startup IDs from request
+            startup_ids = request.data.get('startup_ids', [])
+            
+            # Validate input
+            if not startup_ids or not isinstance(startup_ids, list):
                 return Response(
-                    {'detail': f'Startup with id {startup_id} not found'},
-                    status=status.HTTP_404_NOT_FOUND
+                    {
+                        'error': 'Invalid request',
+                        'detail': 'startup_ids must be a non-empty list'
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
                 )
-        
-        # Record the comparison
-        record_result = record_startup_comparison(request.user, startups, request=request)
-        
-        # Determine response details based on record status
-        status_map = {
-            'recorded': (
-                f'Comparison of {len(startups)} startups recorded successfully',
-                status.HTTP_201_CREATED,
-                record_result['comparisons'][0].compared_at if record_result['comparisons'] else timezone.now()
-            ),
-            'duplicate': (
-                'Comparison already recorded recently',
-                status.HTTP_200_OK,
-                record_result['comparisons'][0].compared_at if record_result['comparisons'] else timezone.now()
-            ),
-            'insufficient_startups': (
-                'At least 2 startups required for comparison',
-                status.HTTP_400_BAD_REQUEST,
-                timezone.now()
-            ),
-            'unauthenticated': (
-                'Authentication required',
-                status.HTTP_401_UNAUTHORIZED,
-                timezone.now()
-            ),
-            'error': (
-                'Failed to record comparison',
-                status.HTTP_500_INTERNAL_SERVER_ERROR,
-                timezone.now()
-            ),
-        }
-        
-        message, response_status, compared_at = status_map.get(
-            record_result['status'],
-            ('Comparison status unknown', status.HTTP_400_BAD_REQUEST, timezone.now())
-        )
-        
-        # Get analytics for each startup
-        total_comparisons = {}
-        unique_comparers = {}
-        
-        for startup in startups:
-            total_comparisons[startup.id] = StartupComparison.objects.filter(startup=startup).count()
-            unique_comparers[startup.id] = (
-                StartupComparison.objects
-                .filter(startup=startup)
-                .values('user')
-                .distinct()
-                .count()
+            
+            if len(startup_ids) < 2:
+                return Response(
+                    {
+                        'error': 'Insufficient startups',
+                        'detail': 'At least 2 startups required for comparison'
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Fetch startups and validate they exist
+            startups = []
+            for startup_id in startup_ids:
+                try:
+                    startup = Startup.objects.get(pk=startup_id)
+                    startups.append(startup)
+                except Startup.DoesNotExist:
+                    return Response(
+                        {
+                            'error': 'Startup not found',
+                            'detail': f'Startup with id {startup_id} does not exist'
+                        },
+                        status=status.HTTP_404_NOT_FOUND
+                    )
+                except (ValueError, TypeError):
+                    return Response(
+                        {
+                            'error': 'Invalid startup ID',
+                            'detail': f'Invalid startup ID: {startup_id}'
+                        },
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+            
+            # Record the comparison
+            record_result = record_startup_comparison(request.user, startups, request=request)
+            
+            # Determine response details based on record status
+            if record_result['status'] == 'recorded':
+                message = f'Comparison of {len(startups)} startups recorded successfully'
+                response_status = status.HTTP_201_CREATED
+                compared_at = record_result['comparisons'][0].compared_at if record_result['comparisons'] else timezone.now()
+            elif record_result['status'] == 'duplicate':
+                message = 'Comparison already recorded recently'
+                response_status = status.HTTP_200_OK
+                compared_at = record_result['comparisons'][0].compared_at if record_result['comparisons'] else timezone.now()
+            elif record_result['status'] == 'insufficient_startups':
+                return Response(
+                    {
+                        'error': 'Insufficient startups',
+                        'detail': 'At least 2 startups required for comparison'
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            elif record_result['status'] == 'unauthenticated':
+                return Response(
+                    {
+                        'error': 'Authentication required',
+                        'detail': 'You must be authenticated to record comparisons'
+                    },
+                    status=status.HTTP_401_UNAUTHORIZED
+                )
+            elif record_result['status'] == 'error':
+                return Response(
+                    {
+                        'error': 'Server error',
+                        'detail': 'Failed to record comparison. Please try again.'
+                    },
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
+            else:
+                return Response(
+                    {
+                        'error': 'Unknown status',
+                        'detail': 'Comparison status unknown'
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Get updated analytics for each startup
+            total_comparisons = {}
+            unique_comparers = {}
+            
+            for startup in startups:
+                total_comparisons[str(startup.id)] = StartupComparison.objects.filter(startup=startup).count()
+                unique_comparers[str(startup.id)] = (
+                    StartupComparison.objects
+                    .filter(startup=startup)
+                    .values('user')
+                    .distinct()
+                    .count()
+                )
+            
+            # Prepare response data
+            response_data = {
+                'message': message,
+                'startup_ids': [s.id for s in startups],
+                'comparison_set_id': str(record_result.get('comparison_set_id', '')),
+                'total_comparisons': total_comparisons,
+                'unique_comparers': unique_comparers,
+                'compared_at': compared_at
+            }
+            
+            # Validate response with serializer
+            serializer = RecordComparisonResponseSerializer(data=response_data)
+            serializer.is_valid(raise_exception=True)
+            
+            return Response(serializer.data, status=response_status)
+            
+        except Exception as e:
+            # Log the error for debugging
+            print(f"Error in RecordStartupComparisonAPI: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            
+            return Response(
+                {
+                    'error': 'Server error',
+                    'detail': 'An unexpected error occurred while recording the comparison'
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
-        
-        response_data = {
-            'message': message,
-            'startup_ids': [s.id for s in startups],
-            'comparison_set_id': record_result.get('comparison_set_id', ''),
-            'total_comparisons': total_comparisons,
-            'unique_comparers': unique_comparers,
-            'compared_at': compared_at
-        }
-        
-        serializer = RecordComparisonResponseSerializer(data=response_data)
-        serializer.is_valid(raise_exception=True)
-        return Response(serializer.data, status=response_status)
 
 
 class watchlist_view(APIView):

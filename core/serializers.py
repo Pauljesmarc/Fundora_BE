@@ -744,3 +744,24 @@ class RecordViewResponseSerializer(serializers.Serializer):
     total_views = serializers.IntegerField()
     unique_viewers = serializers.IntegerField()
     viewed_at = serializers.DateTimeField()
+
+
+class StartupComparisonSerializer(serializers.ModelSerializer):
+    """Serializer for recording startup comparisons"""
+    company_name = serializers.CharField(source='startup.company_name', read_only=True)
+    comparer_email = serializers.EmailField(source='user.email', read_only=True)
+    
+    class Meta:
+        model = StartupComparison
+        fields = ['id', 'comparer_email', 'company_name', 'compared_at', 'comparison_set_id']
+        read_only_fields = ['id', 'comparer_email', 'company_name', 'compared_at']
+
+
+class RecordComparisonResponseSerializer(serializers.Serializer):
+    """Serializer for comparison recording response"""
+    message = serializers.CharField()
+    startup_ids = serializers.ListField(child=serializers.IntegerField())
+    comparison_set_id = serializers.CharField()
+    total_comparisons = serializers.DictField(child=serializers.IntegerField())
+    unique_comparers = serializers.DictField(child=serializers.IntegerField())
+    compared_at = serializers.DateTimeField()

@@ -7,7 +7,8 @@ from .views import (
     StartupProfileView, 
     FinancialProjectionListView,
     UpdateStartupProfileView,
-    RecordStartupViewAPI
+    RecordStartupViewAPI,
+    RecordStartupComparisonAPI
 )
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -80,6 +81,9 @@ urlpatterns = [
     path('startups/<int:pk>/', StartupDetailView.as_view(), name='startup-detail'),
     path('startups/<int:startup_id>/profile/', StartupProfileView.as_view(), name='startup-profile'),
     path('startups/<int:startup_id>/view/', RecordStartupViewAPI.as_view(), name='record-startup-view'),
+    
+    # Analytics
+    path('analytics/comparison/', RecordStartupComparisonAPI.as_view(), name='record-startup-comparison'),
     
     # Financials
     path('financials/<int:startup_id>/', FinancialProjectionListView.as_view(), name='financials'),

@@ -132,6 +132,8 @@ from .serializers import (
     DeckReportSerializer,
     StartupViewSerializer,
     RecordViewResponseSerializer,
+    StartupComparisonSerializer,
+    RecordComparisonResponseSerializer,
 )
 
 def get_django_user_from_session(request):
@@ -1094,6 +1096,105 @@ class RecordStartupViewAPI(APIView):
         serializer.is_valid(raise_exception=True)
         return Response(serializer.data, status=response_status)
 
+
+class RecordStartupComparisonAPI(APIView):
+    """API endpoint to record when a user compares startups"""
+    permission_classes = [IsAuthenticated]
+    authentication_classes = [JWTAuthentication, SessionAuthentication]
+    
+    def post(self, request):
+        # Get startup IDs from request
+        startup_ids = request.data.get('startup_ids', [])
+        
+        if not startup_ids or not isinstance(startup_ids, list):
+            return Response(
+                {'detail': 'startup_ids must be a non-empty list'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        if len(startup_ids) < 2:
+            return Response(
+                {'detail': 'At least 2 startups required for comparison'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Fetch startups
+        startups = []
+        for startup_id in startup_ids:
+            try:
+                startup = Startup.objects.get(pk=startup_id)
+                startups.append(startup)
+            except Startup.DoesNotExist:
+                return Response(
+                    {'detail': f'Startup with id {startup_id} not found'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+        
+        # Record the comparison
+        record_result = record_startup_comparison(request.user, startups, request=request)
+        
+        # Determine response details based on record status
+        status_map = {
+            'recorded': (
+                f'Comparison of {len(startups)} startups recorded successfully',
+                status.HTTP_201_CREATED,
+                record_result['comparisons'][0].compared_at if record_result['comparisons'] else timezone.now()
+            ),
+            'duplicate': (
+                'Comparison already recorded recently',
+                status.HTTP_200_OK,
+                record_result['comparisons'][0].compared_at if record_result['comparisons'] else timezone.now()
+            ),
+            'insufficient_startups': (
+                'At least 2 startups required for comparison',
+                status.HTTP_400_BAD_REQUEST,
+                timezone.now()
+            ),
+            'unauthenticated': (
+                'Authentication required',
+                status.HTTP_401_UNAUTHORIZED,
+                timezone.now()
+            ),
+            'error': (
+                'Failed to record comparison',
+                status.HTTP_500_INTERNAL_SERVER_ERROR,
+                timezone.now()
+            ),
+        }
+        
+        message, response_status, compared_at = status_map.get(
+            record_result['status'],
+            ('Comparison status unknown', status.HTTP_400_BAD_REQUEST, timezone.now())
+        )
+        
+        # Get analytics for each startup
+        total_comparisons = {}
+        unique_comparers = {}
+        
+        for startup in startups:
+            total_comparisons[startup.id] = StartupComparison.objects.filter(startup=startup).count()
+            unique_comparers[startup.id] = (
+                StartupComparison.objects
+                .filter(startup=startup)
+                .values('user')
+                .distinct()
+                .count()
+            )
+        
+        response_data = {
+            'message': message,
+            'startup_ids': [s.id for s in startups],
+            'comparison_set_id': record_result.get('comparison_set_id', ''),
+            'total_comparisons': total_comparisons,
+            'unique_comparers': unique_comparers,
+            'compared_at': compared_at
+        }
+        
+        serializer = RecordComparisonResponseSerializer(data=response_data)
+        serializer.is_valid(raise_exception=True)
+        return Response(serializer.data, status=response_status)
+
+
 class watchlist_view(APIView):
     def get(self, request):
         if not request.user.is_authenticated:
@@ -1553,6 +1654,83 @@ def record_startup_view(user, startup, request=None, dedupe_minutes=5, allow_own
         return {'status': 'error', 'view': None}
 
     return {'status': 'recorded', 'view': view_record}
+
+
+def record_startup_comparison(user, startups, request=None, dedupe_minutes=5):
+    """
+    Utility to record a startup comparison with optional deduplication.
+    
+    Args:
+        user: The user performing the comparison
+        startups: List of Startup objects being compared
+        request: The HTTP request object (optional, for IP tracking)
+        dedupe_minutes: Minutes to check for duplicate comparisons
+    
+    Returns:
+        dict with 'status', 'comparison_set_id', and 'comparisons'
+    """
+    if not user or not getattr(user, 'is_authenticated', False):
+        return {'status': 'unauthenticated', 'comparison_set_id': None, 'comparisons': []}
+    
+    if not startups or len(startups) < 2:
+        return {'status': 'insufficient_startups', 'comparison_set_id': None, 'comparisons': []}
+    
+    # Generate a unique comparison set ID
+    comparison_set_id = str(uuid.uuid4())
+    
+    # Sort startup IDs for consistent comparison
+    sorted_startup_ids = sorted([s.id for s in startups])
+    
+    # Check for duplicate comparisons (same set of startups within time window)
+    cutoff = timezone.now() - timedelta(minutes=dedupe_minutes)
+    
+    # Find recent comparisons by this user
+    recent_comparisons = (
+        StartupComparison.objects
+        .filter(user=user, compared_at__gte=cutoff)
+        .values_list('comparison_set_id', flat=True)
+        .distinct()
+    )
+    
+    # Check if any recent comparison set matches the current startup set
+    for recent_set_id in recent_comparisons:
+        if recent_set_id:
+            recent_startup_ids = sorted(
+                StartupComparison.objects
+                .filter(comparison_set_id=recent_set_id)
+                .values_list('startup_id', flat=True)
+            )
+            if recent_startup_ids == sorted_startup_ids:
+                # Found a duplicate comparison
+                existing_comparisons = StartupComparison.objects.filter(
+                    comparison_set_id=recent_set_id
+                ).order_by('compared_at')
+                return {
+                    'status': 'duplicate',
+                    'comparison_set_id': recent_set_id,
+                    'comparisons': list(existing_comparisons)
+                }
+    
+    # Create new comparison records
+    comparisons = []
+    try:
+        for startup in startups:
+            comparison = StartupComparison.objects.create(
+                user=user,
+                startup=startup,
+                comparison_set_id=comparison_set_id
+            )
+            comparisons.append(comparison)
+    except Exception as exc:
+        print(f"Error recording startup comparison: {exc}")
+        return {'status': 'error', 'comparison_set_id': None, 'comparisons': []}
+    
+    return {
+        'status': 'recorded',
+        'comparison_set_id': comparison_set_id,
+        'comparisons': comparisons
+    }
+
 
 def get_risk_color(confidence):
     """Helper function to get risk color class"""

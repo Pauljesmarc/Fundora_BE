@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pitch Deck Profile</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#eff6ff',
+              100: '#dbeafe',
+              200: '#bfdbfe',
+              300: '#93c5fd',
+              400: '#60a5fa',
+              500: '#3b82f6',
+              600: '#2563eb',
+              700: '#1d4ed8',
+              800: '#1e40af',
+              900: '#1e3a8a'
+            },
+            accent: {
+              50: '#ecfdf5',
+              100: '#d1fae5',
+              200: '#a7f3d0',
+              300: '#6ee7b7',
+              400: '#34d399',
+              500: '#10b981',
+              600: '#059669',
+              700: '#047857',
+              800: '#065f46',
+              900: '#064e3b'
+            }
+          },
+          fontFamily: { 'sans': ['Inter', 'system-ui', 'sans-serif'] }
+        }
+      }
+    };
+  </script>
+  <style>
+    body { font-family: 'Inter', sans-serif; }
+    .hero-gradient { background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%); }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(15px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes slideInLeft { from { opacity: 0; transform: translateX(-20px); } to { opacity: 1; transform: translateX(0); } }
+    @keyframes slideInRight { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
+
+    .fade-in { animation: fadeIn 0.5s ease-out forwards; opacity: 0; }
+    .slide-left { animation: slideInLeft 0.5s ease-out forwards; opacity: 0; }
+    .slide-right { animation: slideInRight 0.5s ease-out forwards; opacity: 0; }
+    .delay-1 { animation-delay: 0.1s; }
+    .delay-2 { animation-delay: 0.2s; }
+    .delay-3 { animation-delay: 0.3s; }
+
+    .card-base { background: #1e293b; border: 1px solid #334155; transition: transform 0.3s ease, box-shadow 0.3s ease; }
+    .card-base:hover { transform: translateY(-3px); box-shadow: 0 10px 20px rgba(0, 0, 0, 0.3); }
+
+    .metric-hover { transition: all 0.3s ease; }
+    .metric-hover:hover { transform: scale(1.03); background: rgba(59, 130, 246, 0.12); }
+
+    #financial-table-container { contain: layout style; }
+    .chart-wrapper { position: relative; width: 100%; height: 250px; contain: layout style paint; }
+  </style>
+</head>
+<body class="bg-slate-950 text-white min-h-screen hero-gradient">
+  <div class="max-w-7xl mx-auto p-6">
+    <!-- Header -->
+    <div class="flex items-center justify-between mb-8 slide-left">
+      <div class="flex items-center">
+        <button id="backBtn" class="mr-6 p-2.5 hover:bg-slate-800 rounded-lg transition-colors border border-slate-700">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+          </svg>
+        </button>
+        <div>
+          <h1 id="deck-name" class="text-3xl font-bold mb-2">Loading...</h1>
+          <p id="deck-tagline" class="text-lg text-gray-400">Loading...</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
+      <!-- Left Column - Main Content -->
+      <div class="lg:col-span-3 space-y-6 slide-left delay-1">
+        <!-- Problem & Solution -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 fade-in delay-1">
+          <div class="card-base rounded-xl p-6">
+            <h2 class="text-lg font-semibold mb-4 text-white">Problem</h2>
+            <p id="problem-description" class="text-gray-300 leading-relaxed text-sm">—</p>
+          </div>
+          <div class="card-base rounded-xl p-6">
+            <h2 class="text-lg font-semibold mb-4 text-white">Solution</h2>
+            <p id="solution-description" class="text-gray-300 leading-relaxed text-sm">—</p>
+          </div>
+        </div>
+
+        <!-- Market Analysis -->
+        <div class="card-base rounded-xl p-6 fade-in delay-2">
+          <div class="flex items-center mb-6">
+            <div class="w-10 h-10 bg-brand-500/15 rounded-lg flex items-center justify-center mr-3">
+              <svg class="w-5 h-5 text-brand-400" fill="currentColor" viewBox="0 0 20 20">
+                <path d="M2 11a1 1 0 011-1h2a1 1 0 011 1v5a1 1 0 01-1 1H3a1 1 0 01-1-1v-5zM8 7a1 1 0 011-1h2a1 1 0 011 1v9a1 1 0 01-1 1H9a1 1 0 01-1-1V7zM14 4a1 1 0 011-1h2a1 1 0 011 1v12a1 1 0 01-1 1h-2a1 1 0 01-1-1V4z"></path>
+              </svg>
+            </div>
+            <h2 class="text-lg font-semibold text-white">Market Analysis</h2>
+          </div>
+          <div class="grid grid-cols-2 gap-4">
+            <div class="bg-brand-500/10 border border-brand-500/25 rounded-lg p-4 metric-hover">
+              <div class="text-xs text-gray-400 mb-2">Primary Market</div>
+              <div id="primary-market" class="text-sm font-semibold text-brand-300">—</div>
+            </div>
+            <div class="bg-accent-500/10 border border-accent-500/25 rounded-lg p-4">
+              <div class="text-xs text-gray-400 mb-2">Target Audience</div>
+              <div id="target-audience" class="text-sm font-semibold text-accent-300">—</div>
+            </div>
+            <div class="bg-brand-500/10 border border-brand-500/25 rounded-lg p-4 metric-hover">
+              <div class="text-xs text-gray-400 mb-2">Market Growth</div>
+              <div id="market-growth" class="text-sm font-semibold text-brand-300">—</div>
+            </div>
+            <div class="bg-accent-500/10 border border-accent-500/25 rounded-lg p-4">
+              <div class="text-xs text-gray-400 mb-2">Competitive Advantage</div>
+              <div id="competitive-advantage" class="text-sm font-semibold text-accent-300 line-clamp-2">—</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Financial Projections -->
+        <div class="card-base rounded-xl p-6 fade-in delay-2">
+          <div class="flex items-center mb-6">
+            <div class="w-10 h-10 bg-accent-500/15 rounded-lg flex items-center justify-center mr-3">
+              <svg class="w-5 h-5 text-accent-400" fill="currentColor" viewBox="0 0 20 20">
+                <path d="M4 4a2 2 0 00-2 2v4a2 2 0 002 2V6h10a2 2 0 00-2-2H4zm2 6a2 2 0 012-2h8a2 2 0 012 2v4a2 2 0 01-2 2H8a2 2 0 01-2-2v-4zm6 4a2 2 0 100-4 2 2 0 000 4z"></path>
+              </svg>
+            </div>
+            <h2 class="text-lg font-semibold text-white">Financial Projections</h2>
+          </div>
+          <!-- Fixed max-height and overflow to prevent UI breaking when financial metrics show -->
+          <div id="financial-table-container" class="mb-6 overflow-y-auto max-h-[300px]"></div>
+          <div class="chart-wrapper mt-6">
+            <canvas id="revenueProfitChart"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Column - Sidebar -->
+      <div class="space-y-6 slide-right delay-2">
+        <!-- Action Buttons -->
+        <div class="card-base rounded-xl p-6 fade-in delay-1">
+          <h2 class="text-lg font-semibold mb-4 text-white">Actions</h2>
+          <div class="space-y-3">
+            <button id="watchlistBtn" class="w-full font-semibold py-3 px-4 rounded-lg transition-colors duration-200 flex items-center justify-center text-sm" disabled>
+              <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"></circle>
+              </svg>
+              Loading...
+            </button>
+            <a id="investBtn" class="w-full bg-brand-600 hover:bg-brand-700 text-white font-semibold py-3 px-4 rounded-lg transition-colors duration-200 text-center block text-sm">
+              Invest
+            </a>
+          </div>
+        </div>
+
+        <!-- Funding Ask -->
+        <div class="card-base rounded-xl p-6 fade-in delay-2">
+          <h2 class="text-lg font-semibold mb-4 text-white">Funding Ask</h2>
+          <div class="space-y-3">
+            <div>
+              <div class="text-xs text-gray-400 mb-1">Amount</div>
+              <div id="funding-ask" class="text-2xl font-bold text-brand-400">—</div>
+            </div>
+            <div class="pt-3 border-t border-slate-700/30">
+              <div class="text-xs text-gray-400 mb-2">Use of Funds</div>
+              <p id="use-of-funds" class="text-sm text-gray-300">—</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Team -->
+        <div class="card-base rounded-xl p-6 fade-in delay-3">
+          <h2 class="text-lg font-semibold mb-4 text-white">Team</h2>
+          <div id="team-container" class="space-y-3">
+            <p class="text-sm text-gray-400">—</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API_BASE = 'https://fundora-be-singapore.onrender.com';
+    let chartInstance = null;
+    let startupId = null;
+    let watchlistIdsSet = new Set();
+    let currentWatchlistState = false;
+
+    window.addEventListener('load', () => {
+      const params = new URLSearchParams(window.location.search);
+      startupId = params.get('id') || params.get('startup_id');
+      if (!startupId) {
+        alert('Missing startup ID');
+        window.history.back();
+        return;
+      }
+      loadAllData();
+    });
+
+    document.getElementById('backBtn').addEventListener('click', () => window.history.back());
+
+    function getAuthToken() {
+      return sessionStorage.getItem('authToken');
+    }
+
+    function authHeaders() {
+      const token = getAuthToken();
+      if (!token) return {};
+      return { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' };
+    }
+
+    async function fetchJSON(url, opts = {}) {
+      const merged = Object.assign({ headers: authHeaders() }, opts);
+      const res = await fetch(url, merged);
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        const err = new Error(`API request failed: ${res.status} ${res.statusText} ${text}`);
+        err.status = res.status;
+        throw err;
+      }
+      return res.json();
+    }
+
+    async function tryFetchJSON(url) {
+      try {
+        return await fetchJSON(url);
+      } catch (err) {
+        console.warn(`fetch failed for ${url}:`, err.message || err);
+        return null;
+      }
+    }
+
+    async function refreshWatchlist() {
+      try {
+        const data = await tryFetchJSON('https://fundora-be-singapore.onrender.com/api/investor/watchlist/');
+        if (data) {
+          const items = data.results || data.watchlist || [];
+          watchlistIdsSet = new Set(items.map(it => it.id));
+        }
+      } catch (err) {
+        console.warn('Could not refresh watchlist:', err);
+      }
+    }
+
+    async function addToWatchlist(sid) {
+      try {
+        const url = `${API_BASE}/api/investor/watchlist/add/${sid}/`;
+        const res = await fetchJSON(url, { method: 'POST' });
+        watchlistIdsSet.add(Number(sid));
+        return !!res;
+      } catch (err) {
+        console.error('Error adding to watchlist:', err);
+        return false;
+      }
+    }
+
+    async function removeFromWatchlist(sid) {
+      try {
+        const url = `${API_BASE}/api/investor/watchlist/remove/${sid}/`;
+        const res = await fetchJSON(url, { method: 'POST' });
+        watchlistIdsSet.delete(Number(sid));
+        return !!res;
+      } catch (err) {
+        console.error('Error removing from watchlist:', err);
+        return false;
+      }
+    }
+
+    function updateWatchlistButton(inWatchlist) {
+      const btn = document.getElementById('watchlistBtn');
+      if (inWatchlist) {
+        btn.className = 'w-full bg-red-600/20 hover:bg-red-600/30 text-red-400 font-semibold py-3 px-4 rounded-lg transition-colors duration-200 flex items-center justify-center text-sm border border-red-600/50';
+        btn.innerHTML = '<svg class="w-4 h-4 mr-2" fill="currentColor" viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.682-7.682 1.06-1.06a5.5 5.5 0 000-7.78z"></path></svg>Saved to Watchlist';
+      } else {
+        btn.className = 'w-full bg-slate-800/30 hover:bg-slate-700/30 text-gray-300 font-semibold py-3 px-4 rounded-lg transition-colors duration-200 flex items-center justify-center text-sm border border-slate-700/50';
+        btn.innerHTML = '<svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"></path></svg>Add to Watchlist';
+      }
+      btn.disabled = false;
+    }
+
+    document.getElementById('watchlistBtn').addEventListener('click', async () => {
+      const btn = document.getElementById('watchlistBtn');
+      btn.disabled = true;
+
+      const currently = currentWatchlistState;
+      if (!currently) {
+        const ok = await addToWatchlist(startupId);
+        if (ok) {
+          currentWatchlistState = true;
+          updateWatchlistButton(true);
+        } else {
+          alert('Could not add to watchlist');
+        }
+      } else {
+        const ok = await removeFromWatchlist(startupId);
+        if (ok) {
+          currentWatchlistState = false;
+          updateWatchlistButton(false);
+        } else {
+          alert('Could not remove from watchlist');
+        }
+      }
+      btn.disabled = false;
+    });
+
+    function escapeHtml(text) {
+      if (typeof text !== 'string') return text;
+      const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+      return text.replace(/[&<>"']/g, m => map[m]);
+    }
+
+    function populateHeaderFromStartup(startup) {
+      document.getElementById('deck-name').textContent = escapeHtml(startup.company_name || 'Untitled');
+      document.getElementById('deck-tagline').textContent = escapeHtml(startup.company_description || 'No description');
+    }
+
+    function populateProblemSolution(problem, solution) {
+      const problemEl = document.getElementById('problem-description');
+      const solutionEl = document.getElementById('solution-description');
+      
+      if (problem) {
+        problemEl.textContent = escapeHtml(problem.description || problem.problem_statement || '—');
+      } else {
+        problemEl.textContent = '—';
+      }
+
+      if (solution) {
+        solutionEl.textContent = escapeHtml(solution.description || solution.solution_statement || '—');
+      } else {
+        solutionEl.textContent = '—';
+      }
+    }
+
+    function populateMarket(market) {
+      if (!market) {
+        document.getElementById('primary-market').textContent = '—';
+        document.getElementById('target-audience').textContent = '—';
+        document.getElementById('market-growth').textContent = '—';
+        document.getElementById('competitive-advantage').textContent = '—';
+        return;
+      }
+
+      document.getElementById('primary-market').textContent = escapeHtml(market.primary_market || market.market || '—');
+      document.getElementById('target-audience').textContent = escapeHtml(market.target_audience || market.audience || '—');
+      
+      const growth = market.market_growth_rate || market.market_growth || null;
+      document.getElementById('market-growth').textContent = growth != null ? `${Number(growth)}%` : '—';
+      
+      document.getElementById('competitive-advantage').textContent = escapeHtml(market.competitive_advantage || market.advantage || '—');
+    }
+
+    function populateAsk(ask) {
+      if (!ask) {
+        document.getElementById('funding-ask').textContent = '—';
+        document.getElementById('use-of-funds').textContent = '—';
+        return;
+      }
+
+      const amount = ask.amount || ask.funding_ask || ask.funding_amount || null;
+      if (amount != null) {
+        document.getElementById('funding-ask').textContent = `$${parseFloat(amount).toLocaleString()}`;
+      } else {
+        document.getElementById('funding-ask').textContent = '—';
+      }
+
+      document.getElementById('use-of-funds').textContent = escapeHtml(ask.usage_description || ask.use_of_funds || ask.description || '—');
+    }
+
+    async function loadStartupData(startupIdParam) {
+      return tryFetchJSON(`https://fundora-be-singapore.onrender.com/api/startups/${startupIdParam}/profile/`);
+    }
+
+    function renderFinancialTable(financials) {
+      const container = document.getElementById("financial-table-container");
+      if (!financials || financials.length === 0) {
+        container.innerHTML = "<p class='text-gray-400 text-center text-sm'>No financial data available.</p>";
+        return;
+      }
+
+      const parsed = financials.map(f => ({
+        year: f.year,
+        revenue: Number(f.revenue) || 0,
+        profit: Number(f.profit) || 0
+      })).sort((a,b) => (Number(a.year) || 0) - (Number(b.year) || 0));
+
+      const rows = parsed.map(f => `
+        <tr class="border-b border-slate-800">
+          <td class="py-2 px-3 text-gray-300 text-sm">${f.year}</td>
+          <td class="py-2 px-3 text-brand-400 font-semibold text-sm">₱${f.revenue.toLocaleString()}</td>
+          <td class="py-2 px-3 text-accent-400 font-semibold text-sm">₱${f.profit.toLocaleString()}</td>
+        </tr>
+      `).join('');
+
+      container.innerHTML = `
+        <div class="overflow-x-auto">
+          <table class="min-w-full text-sm">
+            <thead class="bg-slate-800/40 font-semibold text-gray-300 sticky top-0">
+              <tr>
+                <th class="py-2 px-3 text-left rounded-tl-lg text-xs">Year</th>
+                <th class="py-2 px-3 text-left text-xs">Revenue</th>
+                <th class="py-2 px-3 text-left rounded-tr-lg text-xs">Profit</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      `;
+
+      const ctxEl = document.getElementById("revenueProfitChart");
+      if (!ctxEl) return;
+
+      ctxEl.width = ctxEl.parentElement.offsetWidth;
+      ctxEl.height = 250;
+      ctxEl.style.width = '100%';
+      ctxEl.style.height = '250px';
+
+      const ctx = ctxEl.getContext("2d");
+      if (chartInstance) {
+        try { chartInstance.destroy(); } catch(e){/*ignore*/ }
+        chartInstance = null;
+      }
+
+      chartInstance = new Chart(ctx, {
+        type: "bar",
+        data: {
+          labels: parsed.map(p => p.year),
+          datasets: [
+            { label: "Revenue", data: parsed.map(p => p.revenue), backgroundColor: "#3b82f6", borderRadius: 4 },
+            { label: "Profit", data: parsed.map(p => p.profit), backgroundColor: "#10b981", borderRadius: 4 }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: { duration: 0 },
+          plugins: {
+            legend: { labels: { color: '#fff', font: { size: 11 }, boxHeight: 12 } }
+          },
+          scales: {
+            x: {
+              ticks: { color: '#9ca3af', font: { size: 10 } },
+              grid: { drawBorder: false, color: 'rgba(148, 163, 184, 0.1)' }
+            },
+            y: {
+              beginAtZero: true,
+              ticks: {
+                color: '#9ca3af',
+                font: { size: 10 },
+                callback: v => "₱" + Number(v).toLocaleString()
+              },
+              grid: { drawBorder: false, color: 'rgba(148, 163, 184, 0.1)' }
+            }
+          }
+        }
+      });
+    }
+
+    async function loadDeckReport(startupIdParam) {
+      return tryFetchJSON(`https://fundora-be-singapore.onrender.com/api/startups/${startupIdParam}/profile/`);
+    }
+
+    async function loadStartupProfile(startupIdParam) {
+      return tryFetchJSON(`https://fundora-be-singapore.onrender.com/api/startups/${startupIdParam}/profile/`);
+    }
+
+    function populateTeam(teamMembers) {
+      const container = document.getElementById('team-container');
+      
+      if (!teamMembers || teamMembers.length === 0) {
+        container.innerHTML = '<p class="text-sm text-gray-400">—</p>';
+        return;
+      }
+
+      container.innerHTML = teamMembers.map(member => `
+        <div class="bg-slate-800/30 border border-slate-700 rounded-lg p-4 hover:border-blue-500/50 transition-all">
+          <div class="flex items-center gap-3 mb-2">
+            <div class="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-bold">
+              ${escapeHtml(member.name).charAt(0).toUpperCase()}
+            </div>
+            <div class="flex-1 min-w-0">
+              <h3 class="text-sm font-bold text-white truncate">${escapeHtml(member.name || '—')}</h3>
+              <p class="text-xs text-blue-400 truncate">${escapeHtml(member.title || '—')}</p>
+            </div>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    async function loadAllData() {
+      if (!startupId) {
+        alert('Missing startup id');
+        return;
+      }
+
+      await refreshWatchlist();
+
+      // Load startup data from the profile endpoint which includes deck data
+      let startup = await tryFetchJSON(`https://fundora-be-singapore.onrender.com/api/startups/${startupId}/profile/`);
+      
+      if (!startup) {
+        document.getElementById("deck-name").textContent = "Startup not found";
+        return;
+      }
+
+      // Check if this is a deck-builder startup
+      if (startup.report_type === 'deck') {
+        // Use deck data
+        const deckInfo = startup.deck_info || {};
+        const problem = startup.problem || null;
+        const solution = startup.solution || null;
+        const market = startup.market_analysis || null;
+        const ask = startup.ask || null;
+        const financials = startup.financials || [];
+        const teamMembers = startup.team_members || [];
+
+        populateHeaderFromStartup({ 
+          company_name: deckInfo.company_name, 
+          company_description: deckInfo.tagline 
+        });
+        populateProblemSolution(problem, solution);
+        populateMarket(market);
+        populateAsk(ask);
+        renderFinancialTable(financials);
+        populateTeam(teamMembers);
+        
+        const inWatchlist = startup.is_in_watchlist === true;
+        currentWatchlistState = inWatchlist;
+        updateWatchlistButton(inWatchlist);
+        
+        const investBtn = document.getElementById("investBtn");
+        const currentPath = window.location.pathname + window.location.search;
+        investBtn.href = `../Module_2/Investment_Simulation.html?startup_id=${startupId}&return=${encodeURIComponent(currentPath)}`;
+        return;
+      }
+
+      // Regular startup (non-deck)
+      populateHeaderFromStartup(startup);
+      const inWatchlist = startup.is_in_watchlist === true;
+      currentWatchlistState = inWatchlist;
+      updateWatchlistButton(inWatchlist);
+      
+      const investBtn = document.getElementById("investBtn");
+      const currentPath = window.location.pathname + window.location.search;
+      investBtn.href = `../Module_2/Investment_Simulation.html?startup_id=${startupId}&return=${encodeURIComponent(currentPath)}`;
+    }
+  </script>
+</body>
+</html>

@@ -71,6 +71,12 @@ class MarketAnalysis(models.Model):
     market_growth_rate = models.DecimalField(max_digits=5, decimal_places=2)  # e.g., 12.50%
     competitive_advantage = models.TextField()
 
+    # IRR Calculation Fields
+    valuation_multiple = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    current_valuation = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)
+    projected_revenue_final_year = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)
+    years_to_projection = models.PositiveIntegerField(null=True, blank=True)
+
 class TeamMember(models.Model):
     deck = models.ForeignKey(Deck, on_delete=models.CASCADE, related_name='team_members')
     name = models.CharField(max_length=255)

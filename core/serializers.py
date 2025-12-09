@@ -501,9 +501,7 @@ class StartupSerializer(serializers.ModelSerializer):
     
     def get_pitch_deck_projected_return(self, obj):
         """
-        Uses pitch deck data: current_valuation, projected_revenue, industry_multiple, years_to_projection
-        
-        Formula:
+        Calculate IRR from market analysis data:
         Future Valuation = Projected Revenue × Industry Multiple
         IRR = (Future Valuation / Current Valuation)^(1/years) - 1
         """
@@ -511,34 +509,22 @@ class StartupSerializer(serializers.ModelSerializer):
             if not obj.source_deck:
                 return None
             
-            try:
-                current_valuation = float(getattr(obj.source_deck.ask, 'amount', 0) or 0) if obj.source_deck.ask else 0
-            except:
-                current_valuation = 0
+            market_analysis = obj.source_deck.market_analysis
+            if not market_analysis:
+                return None
             
-            try:
-                financials = obj.source_deck.financials.all().order_by('year')
-                market_analysis = obj.source_deck.market_analysis
+            current_valuation = float(market_analysis.current_valuation or 0)
+            projected_revenue = float(market_analysis.projected_revenue_final_year or 0)
+            industry_multiple = float(market_analysis.valuation_multiple or 0)
+            years_to_projection = int(market_analysis.years_to_projection or 0)
+            
+            if current_valuation > 0 and projected_revenue > 0 and industry_multiple > 0 and years_to_projection > 0:
+                # Future Valuation = Projected Revenue × Industry Multiple
+                future_valuation = projected_revenue * industry_multiple
                 
-                if financials.count() >= 1 and market_analysis:
-                    latest_financial = financials.last()
-                    projected_revenue = float(latest_financial.revenue or 0)
-                    industry_multiple = float(getattr(market_analysis, 'valuation_multiple', 0) or 0)
-                    
-                    # Calculate years from earliest to latest projection
-                    earliest_financial = financials.first()
-                    years_to_projection = latest_financial.year - earliest_financial.year
-                    
-                    # Verify all required values
-                    if current_valuation > 0 and projected_revenue > 0 and industry_multiple > 0 and years_to_projection > 0:
-                        # Future Valuation = Projected Revenue × Industry Multiple
-                        future_valuation = projected_revenue * industry_multiple
-                        
-                        # IRR = (Future Valuation / Current Valuation)^(1/years) - 1
-                        irr = (math.pow(future_valuation / current_valuation, 1 / years_to_projection) - 1) * 100
-                        return round(max(min(irr, 200), -100), 2)
-            except:
-                pass
+                # IRR = (Future Valuation / Current Valuation)^(1/years) - 1
+                irr = (math.pow(future_valuation / current_valuation, 1 / years_to_projection) - 1) * 100
+                return round(max(min(irr, 200), -100), 2)
             
             return None
             
@@ -658,7 +644,11 @@ class MarketAnalysisSerializer(serializers.ModelSerializer):
             'primary_market',
             'target_audience',
             'market_growth_rate',
-            'competitive_advantage'
+            'competitive_advantage',
+            'valuation_multiple',
+            'current_valuation',
+            'projected_revenue_final_year',
+            'years_to_projection'
         ]
 
 class FundingAskSerializer(serializers.ModelSerializer):

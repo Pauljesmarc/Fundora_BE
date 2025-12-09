@@ -18,7 +18,6 @@ from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
-from rest_framework.authentication import SessionAuthentication
 from rest_framework.generics import ListAPIView, RetrieveAPIView
 
 from .models import Startup, Deck, FinancialProjection
@@ -26,12 +25,9 @@ from .serializers import (
     UserSerializer,
     DeckDetailSerializer,
     FinancialProjectionSerializer,
-    StartupViewSerializer,
-    RecordViewResponseSerializer,
 )
 import uuid
 import math
-from datetime import timedelta
 
 class StartupFinancialsView(APIView):
     def get(self, request, startup_id):
@@ -130,10 +126,6 @@ from .serializers import (
     FinancialProjectionSerializer,
     DeckDetailSerializer,
     DeckReportSerializer,
-    StartupViewSerializer,
-    RecordViewResponseSerializer,
-    StartupComparisonSerializer,
-    RecordComparisonResponseSerializer,
 )
 
 def get_django_user_from_session(request):
@@ -651,14 +643,6 @@ class StartupListView(ListAPIView):
 class StartupDetailView(RetrieveAPIView):
     queryset = Startup.objects.all()
     serializer_class = StartupSerializer
-    authentication_classes = [JWTAuthentication, SessionAuthentication]
-    permission_classes = [AllowAny]
-
-    def retrieve(self, request, *args, **kwargs):
-        instance = self.get_object()
-        record_startup_view(request.user, instance, request=request)
-        serializer = self.get_serializer(instance)
-        return Response(serializer.data)
 
 class CurrentUserView(APIView):
     permission_classes = [IsAuthenticated]
@@ -947,9 +931,13 @@ class StartupProfileView(APIView):
         except Startup.DoesNotExist:
             return Response({'detail': 'Startup not found.'}, status=status.HTTP_404_NOT_FOUND)
 
-        record_result = record_startup_view(request.user, startup, request=request)
-        if record_result['status'] not in {'recorded', 'duplicate', 'owner_skipped', 'unauthenticated'}:
-            print(f"Unexpected view recording status for startup {startup.id}: {record_result['status']}")
+        # Track view if user is authenticated
+        if request.user.is_authenticated and startup.owner and request.user != startup.owner.user:
+            try:
+                ip_address = request.META.get('HTTP_X_FORWARDED_FOR', '').split(',')[0] or request.META.get('REMOTE_ADDR')
+                StartupView.objects.create(user=request.user, startup=startup, ip_address=ip_address)
+            except Exception as e:
+                print(f"Error tracking view: {e}")
 
         serializer = StartupSerializer(startup, context={'request': request})
         data = serializer.data
@@ -1006,20 +994,14 @@ class StartupProfileView(APIView):
             ]
             
             # Financial Projections
-        try:
-            financials_qs = FinancialProjection.objects.filter(deck=deck).order_by('year')
-            print(f"DEBUG: Found {financials_qs.count()} financial projections for deck {deck.id}")
             data['financials'] = [
                 {
                     'year': f.year, 
                     'revenue': float(f.revenue), 
                     'profit': float(f.profit)
                 }
-                for f in financials_qs
+                for f in deck.financials.order_by('year')
             ]
-        except Exception as e:
-            print(f"ERROR fetching financials for deck {deck.id}: {e}")
-            data['financials'] = []
         else:
             data['report_type'] = 'regular'
         
@@ -1040,228 +1022,6 @@ class FinancialProjectionListView(APIView):
         financials = FinancialProjection.objects.filter(deck=startup.source_deck).order_by('year')
         serializer = FinancialProjectionSerializer(financials, many=True)
         return Response(serializer.data)
-
-class RecordStartupViewAPI(APIView):
-    """API endpoint to record when a user views a startup profile"""
-    permission_classes = [IsAuthenticated]
-    authentication_classes = [JWTAuthentication, SessionAuthentication]
-    
-    def post(self, request, startup_id):
-        # Get startup or return 404
-        startup = get_object_or_404(Startup, pk=startup_id)
-
-        record_result = record_startup_view(request.user, startup, request=request)
-
-        # Determine response details based on record status
-        status_map = {
-            'recorded': (
-                'View recorded successfully',
-                status.HTTP_201_CREATED,
-                record_result['view'].viewed_at if record_result['view'] else timezone.now()
-            ),
-            'duplicate': (
-                'View already recorded recently',
-                status.HTTP_200_OK,
-                record_result['view'].viewed_at if record_result['view'] else timezone.now()
-            ),
-            'owner_skipped': (
-                'View not recorded (own startup)',
-                status.HTTP_200_OK,
-                timezone.now()
-            ),
-            'unauthenticated': (
-                'Authentication required',
-                status.HTTP_401_UNAUTHORIZED,
-                timezone.now()
-            ),
-            'error': (
-                'Failed to record view',
-                status.HTTP_500_INTERNAL_SERVER_ERROR,
-                timezone.now()
-            ),
-        }
-
-        message, response_status, viewed_at = status_map.get(
-            record_result['status'],
-            ('View status unknown', status.HTTP_400_BAD_REQUEST, timezone.now())
-        )
-
-        total_views = StartupView.objects.filter(startup=startup).count()
-        unique_viewers = StartupView.objects.filter(startup=startup).values('user').distinct().count()
-        
-        response_data = {
-            'message': message,
-            'startup_id': startup_id,
-            'company_name': startup.company_name,
-            'total_views': total_views,
-            'unique_viewers': unique_viewers,
-            'viewed_at': viewed_at
-        }
-        
-        serializer = RecordViewResponseSerializer(data=response_data)
-        serializer.is_valid(raise_exception=True)
-        return Response(serializer.data, status=response_status)
-
-
-class RecordStartupComparisonAPI(APIView):
-    """API endpoint to record when a user compares startups"""
-    permission_classes = [IsAuthenticated]
-    authentication_classes = [JWTAuthentication, SessionAuthentication]
-    
-    def post(self, request, *args, **kwargs):
-        """
-        Record a startup comparison and update analytics.
-        
-        Request body:
-            {
-                "startup_ids": [1, 2, 3]  // List of startup IDs being compared
-            }
-        
-        Returns:
-            {
-                "message": "Comparison recorded successfully",
-                "startup_ids": [1, 2, 3],
-                "comparison_set_id": "uuid-string",
-                "total_comparisons": {"1": 5, "2": 3, "3": 7},
-                "unique_comparers": {"1": 3, "2": 2, "3": 4},
-                "compared_at": "2025-12-08T10:30:00Z"
-            }
-        """
-        try:
-            # Get startup IDs from request
-            startup_ids = request.data.get('startup_ids', [])
-            
-            # Validate input
-            if not startup_ids or not isinstance(startup_ids, list):
-                return Response(
-                    {
-                        'error': 'Invalid request',
-                        'detail': 'startup_ids must be a non-empty list'
-                    },
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-            
-            if len(startup_ids) < 2:
-                return Response(
-                    {
-                        'error': 'Insufficient startups',
-                        'detail': 'At least 2 startups required for comparison'
-                    },
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-            
-            # Fetch startups and validate they exist
-            startups = []
-            for startup_id in startup_ids:
-                try:
-                    startup = Startup.objects.get(pk=startup_id)
-                    startups.append(startup)
-                except Startup.DoesNotExist:
-                    return Response(
-                        {
-                            'error': 'Startup not found',
-                            'detail': f'Startup with id {startup_id} does not exist'
-                        },
-                        status=status.HTTP_404_NOT_FOUND
-                    )
-                except (ValueError, TypeError):
-                    return Response(
-                        {
-                            'error': 'Invalid startup ID',
-                            'detail': f'Invalid startup ID: {startup_id}'
-                        },
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
-            
-            # Record the comparison
-            record_result = record_startup_comparison(request.user, startups, request=request)
-            
-            # Determine response details based on record status
-            if record_result['status'] == 'recorded':
-                message = f'Comparison of {len(startups)} startups recorded successfully'
-                response_status = status.HTTP_201_CREATED
-                compared_at = record_result['comparisons'][0].compared_at if record_result['comparisons'] else timezone.now()
-            elif record_result['status'] == 'duplicate':
-                message = 'Comparison already recorded recently'
-                response_status = status.HTTP_200_OK
-                compared_at = record_result['comparisons'][0].compared_at if record_result['comparisons'] else timezone.now()
-            elif record_result['status'] == 'insufficient_startups':
-                return Response(
-                    {
-                        'error': 'Insufficient startups',
-                        'detail': 'At least 2 startups required for comparison'
-                    },
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-            elif record_result['status'] == 'unauthenticated':
-                return Response(
-                    {
-                        'error': 'Authentication required',
-                        'detail': 'You must be authenticated to record comparisons'
-                    },
-                    status=status.HTTP_401_UNAUTHORIZED
-                )
-            elif record_result['status'] == 'error':
-                return Response(
-                    {
-                        'error': 'Server error',
-                        'detail': 'Failed to record comparison. Please try again.'
-                    },
-                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
-                )
-            else:
-                return Response(
-                    {
-                        'error': 'Unknown status',
-                        'detail': 'Comparison status unknown'
-                    },
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-            
-            # Get updated analytics for each startup
-            total_comparisons = {}
-            unique_comparers = {}
-            
-            for startup in startups:
-                total_comparisons[str(startup.id)] = StartupComparison.objects.filter(startup=startup).count()
-                unique_comparers[str(startup.id)] = (
-                    StartupComparison.objects
-                    .filter(startup=startup)
-                    .values('user')
-                    .distinct()
-                    .count()
-                )
-            
-            # Prepare response data
-            response_data = {
-                'message': message,
-                'startup_ids': [s.id for s in startups],
-                'comparison_set_id': str(record_result.get('comparison_set_id', '')),
-                'total_comparisons': total_comparisons,
-                'unique_comparers': unique_comparers,
-                'compared_at': compared_at
-            }
-            
-            # Validate response with serializer
-            serializer = RecordComparisonResponseSerializer(data=response_data)
-            serializer.is_valid(raise_exception=True)
-            
-            return Response(serializer.data, status=response_status)
-            
-        except Exception as e:
-            # Log the error for debugging
-            print(f"Error in RecordStartupComparisonAPI: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            
-            return Response(
-                {
-                    'error': 'Server error',
-                    'detail': 'An unexpected error occurred while recording the comparison'
-                },
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-
 
 class watchlist_view(APIView):
     def get(self, request):
@@ -1492,7 +1252,10 @@ class company_profile(APIView):
 
         startup = get_object_or_404(Startup, id=startup_id)
 
-        record_startup_view(user, startup, request=request)
+        # Track view if not owner
+        if startup.owner and user != startup.owner.user:
+            ip_address = request.META.get('HTTP_X_FORWARDED_FOR', '').split(',')[0] or request.META.get('REMOTE_ADDR')
+            StartupView.objects.create(user=user, startup=startup, ip_address=ip_address)
 
         is_in_watchlist = Watchlist.objects.filter(user=user, startup=startup).exists()
 
@@ -1643,6 +1406,8 @@ class startup_comparison(APIView):
 # Analytics helper functions
 def get_startup_analytics(startup):
     """Get view and comparison analytics for a startup"""
+    from datetime import timedelta
+    
     total_views = StartupView.objects.filter(startup=startup).count()
     unique_viewers = StartupView.objects.filter(startup=startup).values('user').distinct().count()
     
@@ -1681,124 +1446,6 @@ def get_startup_analytics(startup):
         'recent_comparisons': recent_comparisons,
         'recent_watchlist': recent_watchlist,
     }
-
-
-def record_startup_view(user, startup, request=None, dedupe_minutes=5, allow_owner=False):
-    """Utility to record a startup view with optional deduplication."""
-    if not user or not getattr(user, 'is_authenticated', False):
-        return {'status': 'unauthenticated', 'view': None}
-
-    is_owner = bool(startup.owner and startup.owner.user == user)
-    if is_owner and not allow_owner:
-        return {'status': 'owner_skipped', 'view': None}
-
-    cutoff = timezone.now() - timedelta(minutes=dedupe_minutes)
-    existing = (
-        StartupView.objects
-        .filter(user=user, startup=startup, viewed_at__gte=cutoff)
-        .order_by('-viewed_at')
-        .first()
-    )
-
-    if existing:
-        return {'status': 'duplicate', 'view': existing}
-
-    ip_address = None
-    if request is not None:
-        forwarded = request.META.get('HTTP_X_FORWARDED_FOR', '')
-        if forwarded:
-            ip_address = forwarded.split(',')[0].strip()
-        elif request.META.get('REMOTE_ADDR'):
-            ip_address = request.META.get('REMOTE_ADDR')
-
-    try:
-        view_record = StartupView.objects.create(
-            user=user,
-            startup=startup,
-            ip_address=ip_address
-        )
-    except Exception as exc:
-        print(f"Error recording startup view for startup {startup.id}: {exc}")
-        return {'status': 'error', 'view': None}
-
-    return {'status': 'recorded', 'view': view_record}
-
-
-def record_startup_comparison(user, startups, request=None, dedupe_minutes=5):
-    """
-    Utility to record a startup comparison with optional deduplication.
-    
-    Args:
-        user: The user performing the comparison
-        startups: List of Startup objects being compared
-        request: The HTTP request object (optional, for IP tracking)
-        dedupe_minutes: Minutes to check for duplicate comparisons
-    
-    Returns:
-        dict with 'status', 'comparison_set_id', and 'comparisons'
-    """
-    if not user or not getattr(user, 'is_authenticated', False):
-        return {'status': 'unauthenticated', 'comparison_set_id': None, 'comparisons': []}
-    
-    if not startups or len(startups) < 2:
-        return {'status': 'insufficient_startups', 'comparison_set_id': None, 'comparisons': []}
-    
-    # Generate a unique comparison set ID
-    comparison_set_id = str(uuid.uuid4())
-    
-    # Sort startup IDs for consistent comparison
-    sorted_startup_ids = sorted([s.id for s in startups])
-    
-    # Check for duplicate comparisons (same set of startups within time window)
-    cutoff = timezone.now() - timedelta(minutes=dedupe_minutes)
-    
-    # Find recent comparisons by this user
-    recent_comparisons = (
-        StartupComparison.objects
-        .filter(user=user, compared_at__gte=cutoff)
-        .values_list('comparison_set_id', flat=True)
-        .distinct()
-    )
-    
-    # Check if any recent comparison set matches the current startup set
-    for recent_set_id in recent_comparisons:
-        if recent_set_id:
-            recent_startup_ids = sorted(
-                StartupComparison.objects
-                .filter(comparison_set_id=recent_set_id)
-                .values_list('startup_id', flat=True)
-            )
-            if recent_startup_ids == sorted_startup_ids:
-                # Found a duplicate comparison
-                existing_comparisons = StartupComparison.objects.filter(
-                    comparison_set_id=recent_set_id
-                ).order_by('compared_at')
-                return {
-                    'status': 'duplicate',
-                    'comparison_set_id': recent_set_id,
-                    'comparisons': list(existing_comparisons)
-                }
-    
-    # Create new comparison records
-    comparisons = []
-    try:
-        for startup in startups:
-            comparison = StartupComparison.objects.create(
-                user=user,
-                startup=startup,
-                comparison_set_id=comparison_set_id
-            )
-            comparisons.append(comparison)
-    except Exception as exc:
-        print(f"Error recording startup comparison: {exc}")
-        return {'status': 'error', 'comparison_set_id': None, 'comparisons': []}
-    
-    return {
-        'status': 'recorded',
-        'comparison_set_id': comparison_set_id,
-        'comparisons': comparisons
-    }
-
 
 def get_risk_color(confidence):
     """Helper function to get risk color class"""
@@ -2503,12 +2150,17 @@ class view_startup_report(APIView):
                 'detail': 'Startup not found or you do not have permission to access it.'
             }, status=status.HTTP_404_NOT_FOUND)
 
-        record_startup_view(
-            request.user,
-            startup,
-            request=request,
-            allow_owner=True
-        )
+        # ✅ Track view
+        try:
+            StartupView.objects.create(
+                user=request.user,
+                startup=startup,
+                viewed_at=timezone.now(),
+                ip_address=request.META.get('REMOTE_ADDR')
+            )
+        except Exception as e:
+            # Log error but don't fail the request
+            print(f"Error tracking startup view: {e}")
 
         # Return startup report data
         company_data = {
@@ -3094,33 +2746,59 @@ class create_financial(APIView):
     def post(self, request):
         owner = request.user.profile
         deck_id = request.data.get('deck_id')
-        projections = request.data.get('financials', [])
+        
+        # Get IRR calculation fields
+        current_valuation = request.data.get('current_valuation')
+        industry_multiple = request.data.get('industry_valuation_multiple')
+        years_to_projection = request.data.get('years_to_projection')
+        projected_revenue = request.data.get('projected_revenue')
 
         if not deck_id:
             return Response({'error': 'Missing deck_id.'}, status=status.HTTP_400_BAD_REQUEST)
 
+        # Validate required fields
+        if not all([current_valuation, industry_multiple, years_to_projection, projected_revenue]):
+            return Response({
+                'error': 'Missing required fields: current_valuation, industry_valuation_multiple, years_to_projection, projected_revenue'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
         try:
             deck = Deck.objects.get(id=deck_id, owner=owner)
 
+            # Get or create MarketAnalysis
+            market_analysis, created = MarketAnalysis.objects.get_or_create(deck=deck)
+            
+            # Update MarketAnalysis with IRR fields
+            market_analysis.current_valuation = current_valuation
+            market_analysis.valuation_multiple = industry_multiple
+            market_analysis.projected_revenue_final_year = projected_revenue
+            market_analysis.years_to_projection = years_to_projection
+            market_analysis.save()
+
+            # Also create simplified financial projections for backward compatibility
             # Clear existing financials
             deck.financials.all().delete()
-
-            created = []
-            for item in projections:
-                serializer = FinancialProjectionSerializer(data={
-                    'deck': deck.id,
-                    'year': item.get('year'),
-                    'revenue': item.get('revenue'),
-                    'profit': item.get('profit')
-                })
-                serializer.is_valid(raise_exception=True)
-                created.append(serializer.save())
+            
+            # Create Year 0 and Final Year projections
+            FinancialProjection.objects.create(
+                deck=deck,
+                year=0,
+                revenue=float(current_valuation),
+                profit=float(current_valuation) * 0.2
+            )
+            
+            FinancialProjection.objects.create(
+                deck=deck,
+                year=int(years_to_projection),
+                revenue=float(projected_revenue),
+                profit=float(projected_revenue) * 0.2
+            )
 
             return Response({
                 'success': True,
                 'message': 'Financial projections saved successfully.',
                 'deck_id': deck.id,
-                'projections': FinancialProjectionSerializer(created, many=True).data
+                'market_analysis': MarketAnalysisSerializer(market_analysis).data
             }, status=status.HTTP_200_OK)
 
         except Deck.DoesNotExist:
@@ -3138,9 +2816,17 @@ class create_financial(APIView):
         try:
             owner = request.user.profile
             deck = Deck.objects.get(id=deck_id, owner=owner)
-            projections = deck.financials.all().order_by('year')
-
-            return Response(FinancialProjectionSerializer(projections, many=True).data, status=status.HTTP_200_OK)
+            
+            # Return market analysis data with IRR fields
+            if hasattr(deck, 'market_analysis'):
+                return Response(MarketAnalysisSerializer(deck.market_analysis).data, status=status.HTTP_200_OK)
+            else:
+                return Response({
+                    'current_valuation': None,
+                    'valuation_multiple': None,
+                    'projected_revenue_final_year': None,
+                    'years_to_projection': None
+                }, status=status.HTTP_200_OK)
 
         except Deck.DoesNotExist:
             return Response({'error': 'Deck not found or unauthorized.'}, status=status.HTTP_404_NOT_FOUND)

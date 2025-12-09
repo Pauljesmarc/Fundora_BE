@@ -1006,14 +1006,20 @@ class StartupProfileView(APIView):
             ]
             
             # Financial Projections
+        try:
+            financials_qs = FinancialProjection.objects.filter(deck=deck).order_by('year')
+            print(f"DEBUG: Found {financials_qs.count()} financial projections for deck {deck.id}")
             data['financials'] = [
                 {
                     'year': f.year, 
                     'revenue': float(f.revenue), 
                     'profit': float(f.profit)
                 }
-                for f in deck.financials.order_by('year')
+                for f in financials_qs
             ]
+        except Exception as e:
+            print(f"ERROR fetching financials for deck {deck.id}: {e}")
+            data['financials'] = []
         else:
             data['report_type'] = 'regular'
         

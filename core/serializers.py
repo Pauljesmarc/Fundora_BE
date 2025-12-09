@@ -501,7 +501,7 @@ class StartupSerializer(serializers.ModelSerializer):
     
     def get_pitch_deck_projected_return(self, obj):
         """
-        Calculate IRR from market analysis data:
+        Calculate IRR from financial projection data:
         Future Valuation = Projected Revenue × Industry Multiple
         IRR = (Future Valuation / Current Valuation)^(1/years) - 1
         """
@@ -509,14 +509,15 @@ class StartupSerializer(serializers.ModelSerializer):
             if not obj.source_deck:
                 return None
             
-            market_analysis = obj.source_deck.market_analysis
-            if not market_analysis:
+            # Get the financial projection record (should only be one per deck)
+            financial = obj.source_deck.financials.first()
+            if not financial:
                 return None
             
-            current_valuation = float(market_analysis.current_valuation or 0)
-            projected_revenue = float(market_analysis.projected_revenue_final_year or 0)
-            industry_multiple = float(market_analysis.valuation_multiple or 0)
-            years_to_projection = int(market_analysis.years_to_projection or 0)
+            current_valuation = float(getattr(financial, 'current_valuation', 0) or 0)
+            projected_revenue = float(getattr(financial, 'projected_revenue_final_year', 0) or 0)
+            industry_multiple = float(getattr(financial, 'valuation_multiple', 0) or 0)
+            years_to_projection = int(getattr(financial, 'years_to_projection', 0) or 0)
             
             if current_valuation > 0 and projected_revenue > 0 and industry_multiple > 0 and years_to_projection > 0:
                 # Future Valuation = Projected Revenue × Industry Multiple
@@ -540,19 +541,17 @@ class StartupSerializer(serializers.ModelSerializer):
         """
         try:
             if obj.source_deck:
-                financials = obj.source_deck.financials.all().order_by('year')
+                # For pitch decks, get the first financial projection record
+                financial = obj.source_deck.financials.first()
                 
-                if financials.count() >= 2:
-                    earliest = financials.first()
-                    latest = financials.last()
+                if financial:
+                    years = getattr(financial, 'years_to_projection', None)
+                    projected_revenue = getattr(financial, 'projected_revenue_final_year', None)
+                    current_valuation = getattr(financial, 'current_valuation', None)
                     
-                    earliest_revenue = float(earliest.revenue)
-                    latest_revenue = float(latest.revenue)
-                    number_of_years = latest.year - earliest.year
-                    
-                    if earliest_revenue > 0 and latest_revenue > 0 and number_of_years > 0:
-                        # CAGR = [(Latest / Earliest)^(1/years) - 1] × 100
-                        cagr = (math.pow(latest_revenue / earliest_revenue, 1 / number_of_years) - 1) * 100
+                    if years and projected_revenue and current_valuation and years > 0:
+                        # CAGR = [(Projected / Current)^(1/years) - 1] × 100
+                        cagr = (math.pow(float(projected_revenue) / float(current_valuation), 1 / float(years)) - 1) * 100
                         return round(max(min(cagr, 200), -100), 2)
                 
                 return None

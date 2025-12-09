@@ -68,14 +68,8 @@ class MarketAnalysis(models.Model):
     deck = models.OneToOneField(Deck, on_delete=models.CASCADE, related_name='market_analysis')
     primary_market = models.CharField(max_length=255)
     target_audience = models.TextField()
-    market_growth_rate = models.DecimalField(max_digits=5, decimal_places=2)  # e.g., 12.50%
+    market_growth_rate = models.DecimalField(max_digits=5, decimal_places=2)
     competitive_advantage = models.TextField()
-
-    # IRR Calculation Fields
-    valuation_multiple = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
-    current_valuation = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)
-    projected_revenue_final_year = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)
-    years_to_projection = models.PositiveIntegerField(null=True, blank=True)
 
 class TeamMember(models.Model):
     deck = models.ForeignKey(Deck, on_delete=models.CASCADE, related_name='team_members')
@@ -84,9 +78,10 @@ class TeamMember(models.Model):
 
 class FinancialProjection(models.Model):
     deck = models.ForeignKey(Deck, on_delete=models.CASCADE, related_name='financials')
-    year = models.PositiveIntegerField()
-    revenue = models.DecimalField(max_digits=12, decimal_places=2)
-    profit = models.DecimalField(max_digits=12, decimal_places=2)
+    valuation_multiple = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    current_valuation = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)
+    projected_revenue_final_year = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)
+    years_to_projection = models.PositiveIntegerField(null=True, blank=True)
 
 class FundingAsk(models.Model):
     deck = models.OneToOneField(Deck, on_delete=models.CASCADE, related_name='ask')

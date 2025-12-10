@@ -663,7 +663,7 @@ class TeamMemberSerializer(serializers.ModelSerializer):
 class FinancialProjectionSerializer(serializers.ModelSerializer):
     class Meta:
         model = FinancialProjection
-        fields = ['id', 'deck', 'year', 'revenue', 'profit']
+        fields = ['id', 'deck', 'valuation_multiple', 'current_valuation', 'projected_revenue_final_year', 'years_to_projection']
 
 class DeckDetailSerializer(serializers.ModelSerializer):
     problem = ProblemSerializer(read_only=True)

@@ -114,5 +114,7 @@ urlpatterns = [
     #Starutp Account Update
     path('startup/profile/update/', UpdateStartupProfileView.as_view(), name='update_startup_profile'),
 
+    path('investor/startups/compare/', views.compare_startups.as_view(), name='compare_startups_list'),
+
     path('test/', TestAPI.as_view(), name='test-api'),
 ]

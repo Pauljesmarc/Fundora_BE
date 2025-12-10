@@ -3285,40 +3285,23 @@ class create_financial(APIView):
         try:
             deck = Deck.objects.get(id=deck_id, owner=owner)
 
-            # Get or create MarketAnalysis
-            market_analysis, created = MarketAnalysis.objects.get_or_create(deck=deck)
-            
-            # Update MarketAnalysis with IRR fields
-            market_analysis.current_valuation = current_valuation
-            market_analysis.valuation_multiple = industry_multiple
-            market_analysis.projected_revenue_final_year = projected_revenue
-            market_analysis.years_to_projection = years_to_projection
-            market_analysis.save()
-
-            # Also create simplified financial projections for backward compatibility
             # Clear existing financials
             deck.financials.all().delete()
             
-            # Create Year 0 and Final Year projections
-            FinancialProjection.objects.create(
+            # Create the financial projection with all the IRR fields
+            financial_projection = FinancialProjection.objects.create(
                 deck=deck,
-                year=0,
-                revenue=float(current_valuation),
-                profit=float(current_valuation) * 0.2
-            )
-            
-            FinancialProjection.objects.create(
-                deck=deck,
-                year=int(years_to_projection),
-                revenue=float(projected_revenue),
-                profit=float(projected_revenue) * 0.2
+                current_valuation=float(current_valuation),
+                valuation_multiple=float(industry_multiple),
+                projected_revenue_final_year=float(projected_revenue),
+                years_to_projection=int(years_to_projection)
             )
 
             return Response({
                 'success': True,
                 'message': 'Financial projections saved successfully.',
                 'deck_id': deck.id,
-                'market_analysis': MarketAnalysisSerializer(market_analysis).data
+                'financial_projection': FinancialProjectionSerializer(financial_projection).data
             }, status=status.HTTP_200_OK)
 
         except Deck.DoesNotExist:
@@ -3337,9 +3320,15 @@ class create_financial(APIView):
             owner = request.user.profile
             deck = Deck.objects.get(id=deck_id, owner=owner)
             
-            # Return market analysis data with IRR fields
-            if hasattr(deck, 'market_analysis'):
-                return Response(MarketAnalysisSerializer(deck.market_analysis).data, status=status.HTTP_200_OK)
+            # Return financial projection data with IRR fields
+            financial = deck.financials.first()
+            if financial:
+                return Response({
+                    'current_valuation': financial.current_valuation,
+                    'valuation_multiple': financial.valuation_multiple,
+                    'projected_revenue_final_year': financial.projected_revenue_final_year,
+                    'years_to_projection': financial.years_to_projection
+                }, status=status.HTTP_200_OK)
             else:
                 return Response({
                     'current_valuation': None,

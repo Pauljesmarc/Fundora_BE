@@ -644,10 +644,6 @@ class MarketAnalysisSerializer(serializers.ModelSerializer):
             'target_audience',
             'market_growth_rate',
             'competitive_advantage',
-            'valuation_multiple',
-            'current_valuation',
-            'projected_revenue_final_year',
-            'years_to_projection'
         ]
 
 class FundingAskSerializer(serializers.ModelSerializer):

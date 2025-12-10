@@ -2007,15 +2007,35 @@ class investment_simulation(APIView):
             serializer = StartupSerializer(selected_startup, context={'request': request})
             startup_data = serializer.data
             
-            # Get pure projected return (without risk adjustment)
-            projected_return = startup_data.get('projected_return')
+            is_pitch_deck = startup_data.get('is_deck_builder', False)
+
+            # Select correct IRR field based on startup type
+            if is_pitch_deck:
+                # Pitch Deck IRR: (Future Val / Current Val)^(1/years) - 1
+                # Where Future Val = Projected Revenue × Industry Multiple
+                projected_return = startup_data.get('pitch_deck_projected_return')
+                calculation_source = "pitch_deck_projected_return (IRR from revenue projections)"
+            else:
+                # Normal Startup IRR: (Expected Future Val / Current Val)^(1/years) - 1
+                # Uses explicit valuation fields
+                projected_return = startup_data.get('projected_return')
+                calculation_source = "projected_return (IRR from valuations)"
+
             risk_level = startup_data.get('risk_level')
-            
+
             if projected_return is None:
+                error_detail = (
+                    "This pitch deck does not have complete financial projections. "
+                    "Required: projected_revenue_final_year, valuation_multiple, current_valuation, years_to_projection"
+                    if is_pitch_deck else
+                    "This startup does not have complete valuation data. "
+                    "Required: current_valuation, expected_future_valuation, years_to_future_valuation"
+                )
                 return Response({
                     "error": "Insufficient financial data to run simulation",
-                    "detail": "This startup does not have complete revenue history required for projection",
+                    "detail": error_detail,
                     "missing": {
+                        "is_pitch_deck": is_pitch_deck,
                         "has_projected_return": False,
                         "has_risk_level": risk_level is not None
                     }
@@ -2026,20 +2046,31 @@ class investment_simulation(APIView):
                 "detail": "Please select a startup to run investment simulation"
             }, status=400)
 
-        # Risk Multiplier: High x 0.50, Medium x 0.75, Low x 1.00
+        # Risk Multiplier: ONLY applied to normal startups
+        # High = 0.50, Medium = 0.75, Low = 1.00
         risk_multipliers = {
             'Low': 1.00,
             'Medium': 0.75,
             'High': 0.50
         }
-        risk_multiplier = risk_multipliers.get(risk_level, 0.75) if risk_level else 0.75
         
-        # Calculate risk-adjusted return
-        # Formula: Risk Adjusted Return = Projected Return × Risk Multiplier
-        risk_adjusted_return_percent = (projected_return or 0) * risk_multiplier
-        growth_rate = risk_adjusted_return_percent / 100  # Convert percentage to decimal
+        # Apply risk adjustment based on startup type
+        if is_pitch_deck:
+            risk_multiplier = 1.00
+            risk_adjusted_return_percent = projected_return
+            risk_adjustment_applied = False
+        else:
+            # Normal startups: Apply risk adjustment based on Altman Z-Score
+            risk_multiplier = risk_multipliers.get(risk_level, 0.75) if risk_level else 0.75
+            risk_adjusted_return_percent = projected_return * risk_multiplier
+            risk_adjustment_applied = True
         
-        # Formula: Future Value = Investment Amount x (1 + Risk Adjusted Return)^Year Duration
+        # Convert percentage to decimal
+        growth_rate = risk_adjusted_return_percent / 100  
+        
+        # Investment Simulation Formula:
+        # Pitch Deck: FV = Investment × (1 + IRR)^Years
+        # Normal Startup: FV = Investment × (1 + RiskAdjustedIRR)^Years
         final_value = investment_amount * math.pow(1 + growth_rate, duration_years)
         total_gain = final_value - investment_amount
         roi_percentage = (total_gain / investment_amount) * 100
@@ -2075,27 +2106,30 @@ class investment_simulation(APIView):
 
         response_data = {
             "simulation_run": True,
+            "is_pitch_deck": is_pitch_deck,
             "investment_amount": round(investment_amount, 2),
             "duration_years": duration_years,
-            "projected_return": round(projected_return or 0, 2),
+            "base_projected_return": round(projected_return, 2),
             "risk_multiplier": risk_multiplier,
             "risk_adjusted_return": round(risk_adjusted_return_percent, 2),
-            "risk_adjustment_applied": True,
+            "risk_adjustment_applied": risk_adjustment_applied,
             "final_value": round(final_value, 2),
             "total_gain": round(total_gain, 2),
             "roi_percentage": round(roi_percentage, 2),
             "yearly_breakdown": yearly_breakdown,
             "chart_data": chart_data,
-            "risk_level": risk_level,
+            "risk_level": risk_level if not is_pitch_deck else "N/A (Pitch Deck)",
             "risk_color": risk_color,
-            "calculation_method": "IRR with Risk Adjustment"
+            "calculation_method": "IRR with Risk Adjustment" if risk_adjustment_applied else "IRR (No Risk Adjustment)",
+            "calculation_source": calculation_source
         }
 
         response_data["startup"] = {
             "id": selected_startup.id,
             "name": selected_startup.company_name,
             "industry": selected_startup.industry,
-            "projected_return": projected_return,
+            "base_return": projected_return,
+            "adjusted_return": risk_adjusted_return_percent,
             "risk_level": risk_level,
         }
 

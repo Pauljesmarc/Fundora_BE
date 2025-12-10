@@ -153,6 +153,7 @@ class StartupSerializer(serializers.ModelSerializer):
     market_growth_rate = serializers.SerializerMethodField()
     analytics = serializers.SerializerMethodField()
 
+    has_sufficient_data = serializers.SerializerMethodField()
 
     class Meta:
         model = Startup
@@ -213,6 +214,7 @@ class StartupSerializer(serializers.ModelSerializer):
             'founder_title',
             'founder_linkedin',
             'year_founded',
+            'has_sufficient_data',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'owner_email', 'source_deck_id']
 
@@ -328,6 +330,62 @@ class StartupSerializer(serializers.ModelSerializer):
             return None
         
         return None
+    
+    def get_has_sufficient_data(self, obj):
+        """
+        Check if startup has sufficient data for investment simulation
+        
+        For Pitch Decks:
+        - Financial projections are optional (can be skipped by user)
+        - Check if FinancialProjection data exists and is valid
+        - If no financial data, investment simulation won't work
+        
+        For Regular Startups:
+        - Required fields: total_assets, current_assets, current_liabilities, 
+          retained_earnings, ebit, total_liabilities, current_valuation,
+          expected_future_valuation, years_to_future_valuation
+        """
+        if obj.source_deck:
+            try:
+                financial = obj.source_deck.financials.first()
+                if not financial:
+                    return False
+                
+                has_projection_data = all([
+                    financial.current_valuation,
+                    financial.projected_revenue_final_year,
+                    financial.valuation_multiple,
+                    financial.years_to_projection,
+                ])
+                
+                if not has_projection_data:
+                    return False
+                
+                valid_values = (
+                    float(financial.current_valuation or 0) > 0 and
+                    float(financial.projected_revenue_final_year or 0) > 0 and
+                    float(financial.valuation_multiple or 0) > 0 and
+                    int(financial.years_to_projection or 0) > 0
+                )
+                
+                return valid_values
+                
+            except Exception as e:
+                print(f"Error checking pitch deck financial data: {e}")
+                return False
+            
+        required_for_investment = [
+            obj.current_valuation,
+            obj.expected_future_valuation,
+            obj.years_to_future_valuation,
+        ]
+        
+        has_data = all(
+            field is not None and float(field or 0) > 0 
+            for field in required_for_investment
+        )
+        
+        return has_data
 
     def get_risk_level(self, obj):
         """
@@ -360,7 +418,7 @@ class StartupSerializer(serializers.ModelSerializer):
             sales = float(obj.revenue or getattr(obj, 'current_revenue', 0) or 0)
             
             if total_assets <= 0:
-                return None
+                return 'Data Pending'
             
             # Calculate components
             working_capital = current_assets - current_liabilities

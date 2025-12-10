@@ -968,39 +968,39 @@ class StartupProfileView(APIView):
             }
             
             # Problem section
-            if hasattr(deck, 'problem'):
+            try:
                 data['problem'] = {
                     'description': deck.problem.description
                 }
-            else:
+            except Exception:
                 data['problem'] = None
             
             # Solution section
-            if hasattr(deck, 'solution'):
+            try:
                 data['solution'] = {
                     'description': deck.solution.description
                 }
-            else:
+            except Exception:
                 data['solution'] = None
             
             # Market Analysis section
-            if hasattr(deck, 'market_analysis'):
+            try:
                 data['market_analysis'] = {
                     'primary_market': deck.market_analysis.primary_market,
                     'target_audience': deck.market_analysis.target_audience,
                     'market_growth_rate': float(deck.market_analysis.market_growth_rate),
                     'competitive_advantage': deck.market_analysis.competitive_advantage
                 }
-            else:
+            except Exception:
                 data['market_analysis'] = None
             
             # Funding Ask section
-            if hasattr(deck, 'ask'):
+            try:
                 data['ask'] = {
                     'amount': float(deck.ask.amount),
                     'usage_description': deck.ask.usage_description
                 }
-            else:
+            except Exception:
                 data['ask'] = None
             
             # Team Members
@@ -1010,14 +1010,17 @@ class StartupProfileView(APIView):
             ]
             
             # Financial Projections
-            data['financials'] = [
-                {
-                    'year': f.year, 
-                    'revenue': float(f.revenue), 
-                    'profit': float(f.profit)
+            financials_list = []
+            for f in deck.financials.all():
+                financial_data = {
+                    'valuation_multiple': float(f.valuation_multiple) if f.valuation_multiple else None,
+                    'current_valuation': float(f.current_valuation) if f.current_valuation else None,
+                    'projected_revenue_final_year': float(f.projected_revenue_final_year) if f.projected_revenue_final_year else None,
+                    'years_to_projection': f.years_to_projection if f.years_to_projection else None
                 }
-                for f in deck.financials.order_by('year')
-            ]
+                financials_list.append(financial_data)
+            
+            data['financials'] = financials_list
         else:
             data['report_type'] = 'regular'
         

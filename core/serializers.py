@@ -509,9 +509,8 @@ class StartupSerializer(serializers.ModelSerializer):
             # Calculate equity from total assets and liabilities
             equity = total_assets - total_liabilities
 
-            # Check if we have usable data
-            if equity <= 0:
-                return "N/A"
+            if equity <= 0 or total_assets <= 0:
+                return None
             
             roe_percentage = (net_income / equity) * 100    
             

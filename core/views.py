@@ -1821,8 +1821,13 @@ class company_profile(APIView):
                 for member in deck.team_members.all()
             ]
             startup_data['financials'] = [
-                {'year': f.year, 'revenue': float(f.revenue), 'profit': float(f.profit)}
-                for f in deck.financials.order_by('year')
+                {
+                    'current_valuation': float(f.current_valuation) if f.current_valuation else 0,
+                    'projected_revenue_final_year': float(f.projected_revenue_final_year) if f.projected_revenue_final_year else 0,
+                    'valuation_multiple': float(f.valuation_multiple) if f.valuation_multiple else 0,
+                    'years_to_projection': int(f.years_to_projection) if f.years_to_projection else 0
+                }
+                for f in deck.financials.all()
             ]
 
         return Response(startup_data, status=status.HTTP_200_OK)

@@ -582,12 +582,32 @@ class StartupListView(ListAPIView):
         elif hasattr(self, '_risk_filter') and self._risk_filter is not None:
             risk_value = self._risk_filter
             if risk_value <= 33:
-                # Conservative: Low risk only (exclude pitch decks with None)
-                data = [item for item in data if item.get('risk_level') == 'Low']
+                # Conservative: Low risk only with minimum 5% growth (exclude pitch decks)
+                data = [item for item in data 
+                    if item.get('risk_level') == 'Low'
+                    and item.get('estimated_growth_rate') is not None
+                    and item.get('estimated_growth_rate') >= 5]
             elif risk_value <= 66:
-                # Balanced: Low and Medium risk (exclude pitch decks with None)
-                data = [item for item in data if item.get('risk_level') in ['Low', 'Medium']]
-            # else: Aggressive: show all risk levels (including pitch decks)
+                # Balanced: Low (5%+) and Medium (15%+) risk (exclude pitch decks)
+                data = [item for item in data 
+                    if (item.get('risk_level') == 'Low' 
+                        and item.get('estimated_growth_rate') is not None
+                        and item.get('estimated_growth_rate') >= 5)
+                    or (item.get('risk_level') == 'Medium'
+                        and item.get('estimated_growth_rate') is not None
+                        and item.get('estimated_growth_rate') >= 15)]
+            else:
+                # Aggressive: show all risk levels with their respective minimums (exclude pitch decks)
+                data = [item for item in data 
+                    if (item.get('risk_level') == 'Low' 
+                        and item.get('estimated_growth_rate') is not None
+                        and item.get('estimated_growth_rate') >= 5)
+                    or (item.get('risk_level') == 'Medium'
+                        and item.get('estimated_growth_rate') is not None
+                        and item.get('estimated_growth_rate') >= 15)
+                    or (item.get('risk_level') == 'High'
+                        and item.get('estimated_growth_rate') is not None
+                        and item.get('estimated_growth_rate') >= 30)]
         
         if hasattr(self, '_min_growth_rate_filter') and self._min_growth_rate_filter is not None:
             data = [

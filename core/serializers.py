@@ -153,6 +153,7 @@ class StartupSerializer(serializers.ModelSerializer):
     market_growth_rate = serializers.SerializerMethodField()
     analytics = serializers.SerializerMethodField()
 
+    has_sufficient_data = serializers.SerializerMethodField()
 
     class Meta:
         model = Startup
@@ -213,6 +214,7 @@ class StartupSerializer(serializers.ModelSerializer):
             'founder_title',
             'founder_linkedin',
             'year_founded',
+            'has_sufficient_data',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'owner_email', 'source_deck_id']
 
@@ -328,6 +330,62 @@ class StartupSerializer(serializers.ModelSerializer):
             return None
         
         return None
+    
+    def get_has_sufficient_data(self, obj):
+        """
+        Check if startup has sufficient data for investment simulation
+        
+        For Pitch Decks:
+        - Financial projections are optional (can be skipped by user)
+        - Check if FinancialProjection data exists and is valid
+        - If no financial data, investment simulation won't work
+        
+        For Regular Startups:
+        - Required fields: total_assets, current_assets, current_liabilities, 
+          retained_earnings, ebit, total_liabilities, current_valuation,
+          expected_future_valuation, years_to_future_valuation
+        """
+        if obj.source_deck:
+            try:
+                financial = obj.source_deck.financials.first()
+                if not financial:
+                    return False
+                
+                has_projection_data = all([
+                    financial.current_valuation,
+                    financial.projected_revenue_final_year,
+                    financial.valuation_multiple,
+                    financial.years_to_projection,
+                ])
+                
+                if not has_projection_data:
+                    return False
+                
+                valid_values = (
+                    float(financial.current_valuation or 0) > 0 and
+                    float(financial.projected_revenue_final_year or 0) > 0 and
+                    float(financial.valuation_multiple or 0) > 0 and
+                    int(financial.years_to_projection or 0) > 0
+                )
+                
+                return valid_values
+                
+            except Exception as e:
+                print(f"Error checking pitch deck financial data: {e}")
+                return False
+            
+        required_for_investment = [
+            obj.current_valuation,
+            obj.expected_future_valuation,
+            obj.years_to_future_valuation,
+        ]
+        
+        has_data = all(
+            field is not None and float(field or 0) > 0 
+            for field in required_for_investment
+        )
+        
+        return has_data
 
     def get_risk_level(self, obj):
         """
@@ -360,7 +418,7 @@ class StartupSerializer(serializers.ModelSerializer):
             sales = float(obj.revenue or getattr(obj, 'current_revenue', 0) or 0)
             
             if total_assets <= 0:
-                return None
+                return 'Data Pending'
             
             # Calculate components
             working_capital = current_assets - current_liabilities
@@ -451,9 +509,8 @@ class StartupSerializer(serializers.ModelSerializer):
             # Calculate equity from total assets and liabilities
             equity = total_assets - total_liabilities
 
-            # Check if we have usable data
-            if equity <= 0:
-                return "N/A"
+            if equity <= 0 or total_assets <= 0:
+                return None
             
             roe_percentage = (net_income / equity) * 100    
             
@@ -501,9 +558,7 @@ class StartupSerializer(serializers.ModelSerializer):
     
     def get_pitch_deck_projected_return(self, obj):
         """
-        Uses pitch deck data: current_valuation, projected_revenue, industry_multiple, years_to_projection
-        
-        Formula:
+        Calculate IRR from financial projection data:
         Future Valuation = Projected Revenue × Industry Multiple
         IRR = (Future Valuation / Current Valuation)^(1/years) - 1
         """
@@ -511,34 +566,23 @@ class StartupSerializer(serializers.ModelSerializer):
             if not obj.source_deck:
                 return None
             
-            try:
-                current_valuation = float(getattr(obj.source_deck.ask, 'amount', 0) or 0) if obj.source_deck.ask else 0
-            except:
-                current_valuation = 0
+            # Get the financial projection record (should only be one per deck)
+            financial = obj.source_deck.financials.first()
+            if not financial:
+                return None
             
-            try:
-                financials = obj.source_deck.financials.all().order_by('year')
-                market_analysis = obj.source_deck.market_analysis
+            current_valuation = float(getattr(financial, 'current_valuation', 0) or 0)
+            projected_revenue = float(getattr(financial, 'projected_revenue_final_year', 0) or 0)
+            industry_multiple = float(getattr(financial, 'valuation_multiple', 0) or 0)
+            years_to_projection = int(getattr(financial, 'years_to_projection', 0) or 0)
+            
+            if current_valuation > 0 and projected_revenue > 0 and industry_multiple > 0 and years_to_projection > 0:
+                # Future Valuation = Projected Revenue × Industry Multiple
+                future_valuation = projected_revenue * industry_multiple
                 
-                if financials.count() >= 1 and market_analysis:
-                    latest_financial = financials.last()
-                    projected_revenue = float(latest_financial.revenue or 0)
-                    industry_multiple = float(getattr(market_analysis, 'valuation_multiple', 0) or 0)
-                    
-                    # Calculate years from earliest to latest projection
-                    earliest_financial = financials.first()
-                    years_to_projection = latest_financial.year - earliest_financial.year
-                    
-                    # Verify all required values
-                    if current_valuation > 0 and projected_revenue > 0 and industry_multiple > 0 and years_to_projection > 0:
-                        # Future Valuation = Projected Revenue × Industry Multiple
-                        future_valuation = projected_revenue * industry_multiple
-                        
-                        # IRR = (Future Valuation / Current Valuation)^(1/years) - 1
-                        irr = (math.pow(future_valuation / current_valuation, 1 / years_to_projection) - 1) * 100
-                        return round(max(min(irr, 200), -100), 2)
-            except:
-                pass
+                # IRR = (Future Valuation / Current Valuation)^(1/years) - 1
+                irr = (math.pow(future_valuation / current_valuation, 1 / years_to_projection) - 1) * 100
+                return round(max(min(irr, 200), -100), 2)
             
             return None
             
@@ -554,19 +598,17 @@ class StartupSerializer(serializers.ModelSerializer):
         """
         try:
             if obj.source_deck:
-                financials = obj.source_deck.financials.all().order_by('year')
+                # For pitch decks, get the first financial projection record
+                financial = obj.source_deck.financials.first()
                 
-                if financials.count() >= 2:
-                    earliest = financials.first()
-                    latest = financials.last()
+                if financial:
+                    years = getattr(financial, 'years_to_projection', None)
+                    projected_revenue = getattr(financial, 'projected_revenue_final_year', None)
+                    current_valuation = getattr(financial, 'current_valuation', None)
                     
-                    earliest_revenue = float(earliest.revenue)
-                    latest_revenue = float(latest.revenue)
-                    number_of_years = latest.year - earliest.year
-                    
-                    if earliest_revenue > 0 and latest_revenue > 0 and number_of_years > 0:
-                        # CAGR = [(Latest / Earliest)^(1/years) - 1] × 100
-                        cagr = (math.pow(latest_revenue / earliest_revenue, 1 / number_of_years) - 1) * 100
+                    if years and projected_revenue and current_valuation and years > 0:
+                        # CAGR = [(Projected / Current)^(1/years) - 1] × 100
+                        cagr = (math.pow(float(projected_revenue) / float(current_valuation), 1 / float(years)) - 1) * 100
                         return round(max(min(cagr, 200), -100), 2)
                 
                 return None
@@ -658,7 +700,7 @@ class MarketAnalysisSerializer(serializers.ModelSerializer):
             'primary_market',
             'target_audience',
             'market_growth_rate',
-            'competitive_advantage'
+            'competitive_advantage',
         ]
 
 class FundingAskSerializer(serializers.ModelSerializer):
@@ -674,7 +716,7 @@ class TeamMemberSerializer(serializers.ModelSerializer):
 class FinancialProjectionSerializer(serializers.ModelSerializer):
     class Meta:
         model = FinancialProjection
-        fields = ['id', 'deck', 'year', 'revenue', 'profit']
+        fields = ['id', 'deck', 'valuation_multiple', 'current_valuation', 'projected_revenue_final_year', 'years_to_projection']
 
 class DeckDetailSerializer(serializers.ModelSerializer):
     problem = ProblemSerializer(read_only=True)

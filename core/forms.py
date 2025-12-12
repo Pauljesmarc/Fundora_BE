@@ -127,19 +127,26 @@ TeamMemberFormSet = inlineformset_factory(
 class FinancialProjectionForm(forms.ModelForm):
     class Meta:
         model = FinancialProjection
-        fields = ['year', 'revenue', 'profit']
+        fields = ['valuation_multiple', 'current_valuation', 'projected_revenue_final_year', 'years_to_projection']
         widgets = {
-            'year': forms.TextInput(attrs={
+            'valuation_multiple': forms.NumberInput(attrs={
                 'class': 'p-2 bg-white rounded focus:outline-none focus:ring-2 focus:ring-gray-400 font-semibold',
-                'placeholder': 'Year'
+                'placeholder': 'Valuation Multiple',
+                'step': '0.01'
             }),
-            'revenue': forms.TextInput(attrs={
+            'current_valuation': forms.NumberInput(attrs={
                 'class': 'p-2 bg-white rounded focus:outline-none focus:ring-2 focus:ring-gray-400 font-semibold',
-                'placeholder': 'Revenue'
+                'placeholder': 'Current Valuation',
+                'step': '0.01'
             }),
-            'profit': forms.TextInput(attrs={
+            'projected_revenue_final_year': forms.NumberInput(attrs={
                 'class': 'p-2 bg-white rounded focus:outline-none focus:ring-2 focus:ring-gray-400 font-semibold',
-                'placeholder': 'Profit'
+                'placeholder': 'Projected Revenue (Final Year)',
+                'step': '0.01'
+            }),
+            'years_to_projection': forms.NumberInput(attrs={
+                'class': 'p-2 bg-white rounded focus:outline-none focus:ring-2 focus:ring-gray-400 font-semibold',
+                'placeholder': 'Years to Projection'
             }),
         }
 

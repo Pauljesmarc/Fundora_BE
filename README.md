@@ -6,13 +6,13 @@ Fundora is a web-based discovery platform that bridges the funding visibility ga
 
 ---
 
-## 🚀 Live Demo
+## Live Demo
 
 **Platform URL:** [https://fundora-fe.onrender.com]
 
 ---
 
-## 📋 Table of Contents
+## Table of Contents
 
 - [Features](#features)
 - [Tech Stack](#tech-stack)
@@ -22,7 +22,7 @@ Fundora is a web-based discovery platform that bridges the funding visibility ga
 
 ---
 
-## ✨ Features
+## Features
 
 ### For Investors
 - 🔍 Browse and filter startups by industry, funding needs, and risk level
@@ -38,7 +38,7 @@ Fundora is a web-based discovery platform that bridges the funding visibility ga
 - 🎯 Get discovered by active angel investors
 ---
 
-## 🛠 Tech Stack
+## Tech Stack
 
 ### Frontend
 - **HTML5** - Markup structure
@@ -61,7 +61,7 @@ Fundora is a web-based discovery platform that bridges the funding visibility ga
 
 ---
 
-## 🚦 Getting Started
+## Getting Started
 
 ### Prerequisites
 
@@ -143,7 +143,7 @@ DATABASE_URL=sqlite:///db.sqlite3
 
 ---
 
-## 🔑 Test Accounts
+## Test Accounts
 
 Use these credentials to explore different user experiences:
 

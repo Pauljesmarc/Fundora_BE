@@ -20,6 +20,8 @@ from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.authentication import SessionAuthentication
 from rest_framework.generics import ListAPIView, RetrieveAPIView
+from django.conf import settings
+import requests
 
 from .models import Startup, Deck, FinancialProjection
 from .serializers import (
@@ -28,6 +30,7 @@ from .serializers import (
     FinancialProjectionSerializer,
     StartupViewSerializer,
     RecordViewResponseSerializer,
+    StartupSerializer,
 )
 import uuid
 import math
@@ -667,6 +670,94 @@ class StartupListView(ListAPIView):
             data = sorted(data, key=lambda x: float(x.get('market_growth_rate') or 999999))
         
         return Response(data)
+    
+class AIRecommendationsView(APIView):
+    permission_classes = []
+    
+    def get(self, request):
+        if request.user.is_authenticated:
+            user_id = request.user.id
+        else:
+            user_id = int(request.query_params.get('user_id', 1))
+        
+        n_recommendations = int(request.query_params.get('n', 10))
+        
+        try:
+            ml_service_url = "http://localhost:8001"
+            response = requests.post(
+                f"{ml_service_url}/api/recommendations",
+                json={
+                    "user_id": user_id,
+                    "n_recommendations": n_recommendations,
+                    "exclude_viewed": False # change for now to see all recom
+                },
+                timeout=5
+            )
+            
+            if response.status_code == 200:
+                ml_data = response.json()
+                
+                # DEBUG: Print what ML service returned
+                print("=== ML SERVICE RESPONSE ===")
+                print(f"ML Data: {ml_data}")
+                print(f"Recommendations: {ml_data.get('recommendations', [])}")
+                
+                startup_ids = [rec['startup_id'] for rec in ml_data['recommendations']]
+                print(f"Startup IDs to fetch: {startup_ids}")
+                
+                # Fetch full startup details from database
+                startups = Startup.objects.filter(id__in=startup_ids)
+                print(f"Found {len(startups)} startups in database")
+                print(f"Startup IDs found: {[s.id for s in startups]}")
+                
+                # Preserve the order from ML recommendations
+                startup_dict = {s.id: s for s in startups}
+                ordered_startups = [startup_dict[sid] for sid in startup_ids if sid in startup_dict]
+                
+                serializer = StartupSerializer(
+                    ordered_startups, 
+                    many=True, 
+                    context={'request': request}
+                )
+                
+                return Response({
+                    'recommendations': serializer.data,
+                    'model_version': ml_data.get('model_version', 'v1.0'),
+                    'ai_powered': True,
+                    'count': len(serializer.data),
+                    'user_id': user_id
+                })
+            else:
+                # Fallback to popular startups
+                return self._fallback_recommendations(request, n_recommendations)
+                
+        except requests.exceptions.RequestException as e:
+            print(f"ML Service error: {e}")
+            # Fallback to popular startups
+            return self._fallback_recommendations(request, n_recommendations)
+    
+    def _fallback_recommendations(self, request, n=10):
+        """Fallback to simple popularity-based recommendations"""
+        from django.db.models import Count
+        
+        # Get most viewed startups
+        popular_startups = Startup.objects.annotate(
+            view_count=Count('startupview')
+        ).order_by('-view_count')[:n]
+        
+        serializer = StartupSerializer(
+            popular_startups, 
+            many=True, 
+            context={'request': request}
+        )
+        
+        return Response({
+            'recommendations': serializer.data,
+            'ai_powered': False,
+            'fallback': True,
+            'count': len(serializer.data)
+        })
+
     
 class StartupDetailView(RetrieveAPIView):
     queryset = Startup.objects.all()

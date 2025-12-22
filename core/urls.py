@@ -8,8 +8,10 @@ from .views import (
     FinancialProjectionListView,
     UpdateStartupProfileView,
     RecordStartupViewAPI,
-    RecordStartupComparisonAPI
+    RecordStartupComparisonAPI,
+    AIRecommendationsView
 )
+
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from .views import TestAPI
@@ -115,6 +117,9 @@ urlpatterns = [
     path('startup/profile/update/', UpdateStartupProfileView.as_view(), name='update_startup_profile'),
 
     path('investor/startups/compare/', views.compare_startups.as_view(), name='compare_startups_list'),
+
+    # AI Recommendations
+    path('ai-recommendations/', AIRecommendationsView.as_view(), name='ai_recommendations'),
 
     path('test/', TestAPI.as_view(), name='test-api'),
 ]

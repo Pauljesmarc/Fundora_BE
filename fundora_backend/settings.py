@@ -137,10 +137,14 @@ WSGI_APPLICATION = 'fundora_backend.wsgi.application'
 
 # Database
 DATABASES = {
-    'default': dj_database_url.config(
-        default='sqlite:///db.sqlite3',
-        conn_max_age=600
-    )
+    'default': {
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': 'db_fundora',
+        'USER': 'db_fundora_user',
+        'PASSWORD': 'cuVQpvlKLFk3BvVuucwdkByxIRws7qrQ',
+        'HOST': 'dpg-d4sq0vi4d50c73df79tg-a.singapore-postgres.render.com',
+        'PORT': '5432',
+    }
 }
 
 # SSL configuration ONLY for PostgreSQL (when DATABASE_URL is set)
@@ -220,3 +224,5 @@ SIMPLE_JWT = {
     'ROTATE_REFRESH_TOKENS': False,
     'BLACKLIST_AFTER_ROTATION': False,
 }
+
+ML_SERVICE_URL = "https://fundora-ml-service.onrender.com"

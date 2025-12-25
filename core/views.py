@@ -1,9 +1,10 @@
+# Django core imports
 from django.utils import timezone
 from django.shortcuts import render, redirect, get_object_or_404
 from django.http import HttpResponse, JsonResponse, Http404
 from django.template.loader import render_to_string
 from django.contrib import messages
-from django.contrib.auth import authenticate, login
+from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from django.contrib.auth.hashers import make_password, check_password
@@ -12,42 +13,21 @@ from django.utils.decorators import method_decorator
 from django.views.decorators.http import require_POST
 from django.forms import ValidationError, inlineformset_factory
 from django.db import transaction
-from django.db.models import Value, FloatField, Case, When, Prefetch
+from django.db.models import Value, FloatField, Case, When, Prefetch, Count, Q
+from django.conf import settings
 
+# REST Framework imports
 from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.authentication import SessionAuthentication
 from rest_framework.generics import ListAPIView, RetrieveAPIView
-from django.conf import settings
-import requests
+from rest_framework.decorators import api_view, authentication_classes, permission_classes
+from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.authentication import JWTAuthentication
 
-from .models import Startup, Deck, FinancialProjection
-from .serializers import (
-    UserSerializer,
-    DeckDetailSerializer,
-    FinancialProjectionSerializer,
-    StartupViewSerializer,
-    RecordViewResponseSerializer,
-    StartupSerializer,
-)
-import uuid
-import math
-from datetime import timedelta
-
-class StartupFinancialsView(APIView):
-    def get(self, request, startup_id):
-        try:
-            startup = Startup.objects.get(pk=startup_id)
-        except Startup.DoesNotExist:
-            return Response({'detail': 'Startup not found.'}, status=status.HTTP_404_NOT_FOUND)
-        financials = FinancialProjection.objects.filter(deck=startup.source_deck)
-        serializer = FinancialProjectionSerializer(financials, many=True)
-        return Response(serializer.data)
-
-    
-# 3rd-party
+# ReportLab imports for PDF generation
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
@@ -62,12 +42,16 @@ from reportlab.platypus import (
 from reportlab.lib.enums import TA_CENTER
 from reportlab.lib import colors
 
-# Python standard
+# Python standard library imports
 from io import BytesIO
 import datetime
 import json
+import uuid
+import math
+from datetime import timedelta
+import requests
 
-# Project-specific
+# Local app imports - Models
 from .models import (
     FinancialProjection,
     Startup,
@@ -83,6 +67,8 @@ from .models import (
     StartupView,
     StartupComparison,
 )
+
+# Local app imports - Forms
 from .forms import (
     RegistrationForm,
     LoginForm,
@@ -95,31 +81,9 @@ from .forms import (
     TeamMemberFormSet,
 )
 
-from rest_framework.decorators import api_view, authentication_classes, permission_classes
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import status
-from django.shortcuts import get_object_or_404
-from django.db import transaction
-from django.contrib.auth.hashers import make_password
-from .models import RegisteredUser  # assuming your custom model
-from django.contrib.auth.hashers import check_password
-from .models import Startup, Watchlist, ComparisonSet, Download, StartupView, StartupComparison, Deck
-from django.db.models import Q
-from rest_framework.permissions import IsAuthenticated
-from django.http import HttpResponse
-from io import BytesIO
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.enums import TA_CENTER
-from reportlab.lib import colors
-import datetime
-import uuid
-from django.contrib.auth import logout
-from rest_framework_simplejwt.tokens import RefreshToken
-from rest_framework_simplejwt.authentication import JWTAuthentication
+# Local app imports - Serializers
 from .serializers import (
+    UserSerializer,
     InvestorRegistrationSerializer,
     StartupRegistrationSerializer,
     LoginSerializer,
@@ -683,7 +647,7 @@ class AIRecommendationsView(APIView):
         n_recommendations = int(request.query_params.get('n', 10))
         
         try:
-            ml_service_url = "http://localhost:8001"
+            ml_service_url = "https://fundora-ml-service.onrender.com"
             response = requests.post(
                 f"{ml_service_url}/api/recommendations",
                 json={

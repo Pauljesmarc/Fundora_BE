@@ -225,4 +225,4 @@ SIMPLE_JWT = {
     'BLACKLIST_AFTER_ROTATION': False,
 }
 
-ML_SERVICE_URL = "http://localhost:8001"
+ML_SERVICE_URL = "https://fundora-ml-service.onrender.com"

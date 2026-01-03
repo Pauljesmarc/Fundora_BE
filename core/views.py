@@ -3734,13 +3734,19 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 
 class LatestSimulationView(APIView):
-    #permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request, startup_id=None):
-        # Retrieve latest result for this user
         latest_result = LATEST_SIMULATIONS.get(request.user.id)
 
         if not latest_result:
-            return Response({"error": "No simulation result found"}, status=404)
+            return Response({
+                "simulation_run": False,
+                "message": "No simulation result found"
+            }, status=200)
 
-        return Response(latest_result, status=200)
+        return Response({
+            "simulation_run": True,
+            "result": latest_result
+        }, status=200)
+

@@ -123,7 +123,7 @@ urlpatterns = [
     path('ai-recommendations/', AIRecommendationsView.as_view(), name='ai_recommendations'),
 
     # AI chatbot simulation result endpoint
-    path('simulation-reult/', LatestSimulationView.as_view(), name='latest_simulation'),
+    path('simulation-result/', LatestSimulationView.as_view(), name='latest_simulation'),
     
     path('test/', TestAPI.as_view(), name='test-api'),
 ]

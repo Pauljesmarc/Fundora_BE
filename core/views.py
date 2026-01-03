@@ -2064,6 +2064,7 @@ def get_risk_color(confidence):
     else:
         return 'bg-red-100 text-red-800'
 
+LATEST_SIMULATIONS = {}
 class investment_simulation(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -2215,6 +2216,8 @@ class investment_simulation(APIView):
             "adjusted_return": risk_adjusted_return_percent,
             "risk_level": risk_level,
         }
+
+        LATEST_SIMULATIONS[request.user.id] = response_data
 
         return Response(response_data, status=200)
 
@@ -3726,3 +3729,18 @@ class TestAPI(APIView):
 
     def get(self, request):
         return Response({"message": "API is working!"})
+    
+from rest_framework.views import APIView
+from rest_framework.response import Response
+
+class LatestSimulationView(APIView):
+    #permission_classes = [IsAuthenticated]
+
+    def get(self, request, startup_id=None):
+        # Retrieve latest result for this user
+        latest_result = LATEST_SIMULATIONS.get(request.user.id)
+
+        if not latest_result:
+            return Response({"error": "No simulation result found"}, status=404)
+
+        return Response(latest_result, status=200)

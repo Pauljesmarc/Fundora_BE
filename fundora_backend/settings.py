@@ -42,6 +42,7 @@ INSTALLED_APPS = [
     'core',
     'rest_framework',
     'corsheaders',
+    'django_extensions',
 ]
 
 MIDDLEWARE = [
@@ -136,14 +137,24 @@ WSGI_APPLICATION = 'fundora_backend.wsgi.application'
 # }
 
 # Database
+# DATABASES = {
+#     'default': {
+#         'ENGINE': 'django.db.backends.postgresql',
+#         'NAME': 'db_fundora',
+#         'USER': 'db_fundora_user',
+#         'PASSWORD': 'cuVQpvlKLFk3BvVuucwdkByxIRws7qrQ',
+#         'HOST': 'dpg-d4sq0vi4d50c73df79tg-a.singapore-postgres.render.com',
+#         'PORT': '5432',
+#         'OPTIONS': {
+#             'sslmode': 'require',
+#         }
+#     }
+# }
+
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'db_fundora',
-        'USER': 'db_fundora_user',
-        'PASSWORD': 'cuVQpvlKLFk3BvVuucwdkByxIRws7qrQ',
-        'HOST': 'dpg-d4sq0vi4d50c73df79tg-a.singapore-postgres.render.com',
-        'PORT': '5432',
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': BASE_DIR / 'db.sqlite3',
     }
 }
 

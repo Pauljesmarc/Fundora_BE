@@ -146,6 +146,8 @@ class StartupSerializer(serializers.ModelSerializer):
     reward_potential = serializers.SerializerMethodField()
     projected_return = serializers.SerializerMethodField()
     pitch_deck_projected_return = serializers.SerializerMethodField()
+    irr_source = serializers.SerializerMethodField()
+    profile_completeness = serializers.SerializerMethodField()
     estimated_growth_rate = serializers.SerializerMethodField()
     display_industry = serializers.SerializerMethodField()
     is_in_watchlist = serializers.SerializerMethodField()
@@ -158,65 +160,158 @@ class StartupSerializer(serializers.ModelSerializer):
     class Meta:
         model = Startup
         fields = [
+            # Identity
             'id',
             'company_name',
-            'industry',
+            'logo',
             'tagline',
+            'industry',
             'display_industry',
+            'headquarters',
+            'year_founded',
+            'company_stage',
             'company_description',
-            'data_source_confidence',
+            'website_url',
+            'linkedin_url',
+            'twitter_url',
+            'facebook_url',
+            
+            # Problem & Solution
+            'problem_statement',
+            'solution_description',
+            'how_it_works',
+            'key_features',
+            'supported_platforms',
+            'product_status',
+            
+            # Market & Positioning
+            'primary_market',
+            'target_customer_segments',
+            'target_geography',
+            'market_size_tam',
+            'market_size_sam',
+            'market_growth_rate',
+            'competitors',
+            'competitive_advantage',
+            'go_to_market_strategy',
+            
+            # Traction
+            'current_mrr_arr',
+            'total_users',
+            'paid_users',
+            'key_traction_metrics',
+            'major_milestones',
+            'notable_customers',
+            
+            # Team
+            'additional_founders',
+            'key_team_members',
+            'advisors',
+            'team_size',
+            
+            # Business Model
+            'business_model_type',
+            'revenue_streams',
+            'pricing_example',
+            'key_partnerships',
+            'operational_status',
+            
+            # Financials
+            'reporting_period',
             'revenue',
+            'current_revenue',
+            'previous_revenue',
             'net_income',
             'total_assets',
             'total_liabilities',
             'shareholder_equity',
             'cash_flow',
-            'current_revenue',
-            'previous_revenue',
             'investment_flow',
             'financing_flow',
-            'reporting_period',
-            'funding_ask',
-            'source_deck_id',
-            'is_deck_builder',
-            'team_strength',
-            'market_position',
-            'brand_reputation',
-            'confidence_percentage',
-            'reward_potential',
-            'estimated_growth_rate',
-            'projected_return',
-            'pitch_deck_projected_return',
-            'risk_level',
-            'risk_score',
-            'owner_email',
-            'created_at',
-            'updated_at',
-            'is_in_watchlist',
-            'market_growth_rate',
-            'analytics',
-            'current_revenue',
-            'previous_revenue',
-            'time_between_periods',
             'retained_earnings',
             'ebit',
             'current_assets',
             'current_liabilities',
+            'cac',
+            'ltv',
+            'gross_margin',
+            
+            # Projections & Risk
             'current_valuation',
             'expected_future_valuation',
             'years_to_future_valuation',
+            'time_between_periods',
+            'financial_projections',
+            'key_assumptions',
+            'projected_return',
+            'pitch_deck_projected_return',
+            'estimated_growth_rate',
+            'risk_level',
+            'risk_score',
+            'reward_potential',
+            'irr_source',
+            
+            # Qualitative
+            'team_strength',
+            'market_position',
+            'brand_reputation',
+            'confidence_percentage',
+            'data_source_confidence',
+            
+            # Funding
+            'capital_raised_to_date',
+            'funding_history',
+            'current_round_type',
+            'funding_ask',
+            'funding_usage',
+            'target_valuation',
+            'expected_runway_months',
+            
+            # Impact & IP
+            'impact_statement',
+            'sdg_alignment',
+            'intellectual_property',
+            'regulatory_status',
+            'awards_and_recognition',
+            
+            # Media
+            'demo_video_url',
+            'pitch_video_url',
+            'pitch_deck_pdf',
+            'one_pager_pdf',
+            'data_room_url',
+            
+            # Contact
+            'primary_contact_name',
             'contact_email',
             'contact_phone',
-            'website_url',
-            'linkedin_url',
-            'location',
-            'founder_name',
-            'founder_title',
-            'founder_linkedin',
-            'year_founded',
+            'contact_whatsapp',
+            'contact_telegram',
+            'preferred_check_size_min',
+            'preferred_check_size_max',
+            'investor_preferences',
+            
+            # Metadata
+            'owner_email',
+            'source_deck_id',
+            'created_at',
+            'updated_at',
+            'is_in_watchlist',
+            'analytics',
             'has_sufficient_data',
+            'profile_completeness',
         ]
-        read_only_fields = ['id', 'created_at', 'updated_at', 'owner_email', 'source_deck_id']
+        read_only_fields = [
+            'id', 
+            'created_at', 
+            'updated_at', 
+            'owner_email', 
+            'source_deck_id',
+            'is_in_watchlist',
+            'analytics',
+            'has_sufficient_data',
+            'profile_completeness',
+        ]
 
     def to_representation(self, instance):
         """
@@ -335,61 +430,42 @@ class StartupSerializer(serializers.ModelSerializer):
         """
         Check if startup has sufficient data for investment simulation
         
-        For Pitch Decks:
-        - Financial projections are optional (can be skipped by user)
-        - Check if FinancialProjection data exists and is valid
-        - If no financial data, investment simulation won't work
-        
-        For Regular Startups:
-        - Required fields: total_assets, current_assets, current_liabilities, 
-          retained_earnings, ebit, total_liabilities, current_valuation,
-          expected_future_valuation, years_to_future_valuation
+        Unified Logic:
+        - Primary: Check for valuation-based IRR data (most complete)
+        - Fallback: Check for pitch deck projection data
+        - Returns True if either is available and valid
         """
-        if obj.source_deck:
-            try:
-                financial = obj.source_deck.financials.first()
-                if not financial:
-                    return False
-                
-                has_projection_data = all([
-                    financial.current_valuation,
-                    financial.projected_revenue_final_year,
-                    financial.valuation_multiple,
-                    financial.years_to_projection,
-                ])
-                
-                if not has_projection_data:
-                    return False
-                
-                valid_values = (
-                    float(financial.current_valuation or 0) > 0 and
-                    float(financial.projected_revenue_final_year or 0) > 0 and
-                    float(financial.valuation_multiple or 0) > 0 and
-                    int(financial.years_to_projection or 0) > 0
-                )
-                
-                return valid_values
-                
-            except Exception as e:
-                print(f"Error checking pitch deck financial data: {e}")
-                return False
+        try:
+            # Check valuation-based data first (preferred)
+            current_valuation = float(getattr(obj, 'current_valuation', 0) or 0)
+            expected_future_valuation = float(getattr(obj, 'expected_future_valuation', 0) or 0)
+            years_to_future_valuation = float(getattr(obj, 'years_to_future_valuation', 0) or 0)
             
-        required_for_investment = [
-            obj.current_valuation,
-            obj.expected_future_valuation,
-            obj.years_to_future_valuation,
-        ]
-        
-        has_data = all(
-            field is not None and float(field or 0) > 0 
-            for field in required_for_investment
-        )
-        
-        return has_data
+            if current_valuation > 0 and expected_future_valuation > 0 and years_to_future_valuation > 0:
+                return True
+            
+            # Check pitch deck projection data as fallback
+            if obj.source_deck:
+                financial = obj.source_deck.financials.first()
+                if financial:
+                    deck_current_val = float(getattr(financial, 'current_valuation', 0) or 0)
+                    projected_revenue = float(getattr(financial, 'projected_revenue_final_year', 0) or 0)
+                    industry_multiple = float(getattr(financial, 'valuation_multiple', 0) or 0)
+                    years = int(getattr(financial, 'years_to_projection', 0) or 0)
+                    
+                    if deck_current_val > 0 and projected_revenue > 0 and industry_multiple > 0 and years > 0:
+                        return True
+            
+            return False
+            
+        except Exception as e:
+            print(f"Error checking investment data sufficiency: {e}")
+            return False
 
     def get_risk_level(self, obj):
         """
         Uses Altman Z-Score Formula for Private Companies (Z')
+        Returns 'Data Pending' if insufficient financial data for calculation.
         Z' = 0.717 x (Working Capital / Total Assets) 
              + 0.847 x (Retained Earnings / Total Assets) 
              + 3.107 x (EBIT / Total Assets) 
@@ -417,7 +493,21 @@ class StartupSerializer(serializers.ModelSerializer):
             current_liabilities = float(getattr(obj, 'current_liabilities', 0) or 0)
             sales = float(obj.revenue or getattr(obj, 'current_revenue', 0) or 0)
             
-            if total_assets <= 0:
+            # Check if we have minimum required data
+            if total_assets <= 0 or total_liabilities <= 0:
+                return 'Data Pending'
+            
+            # Check if we have enough data points for meaningful calculation
+            required_fields = [
+                current_assets > 0,
+                current_liabilities > 0,
+                retained_earnings is not None,
+                ebit is not None,
+                sales > 0
+            ]
+            
+            # If less than 3 of 5 required fields available, data is insufficient
+            if sum(required_fields) < 3:
                 return 'Data Pending'
             
             # Calculate components
@@ -532,15 +622,18 @@ class StartupSerializer(serializers.ModelSerializer):
         
     def get_projected_return(self, obj):
         """
-        Calculate Projected Return ONLY for normal startups using IRR formula
-        Uses explicit valuation fields: current_valuation, expected_future_valuation, years_to_future_valuation
+        Unified Projected Return (IRR) - Primary Display Metric
         
-        Formula: IRR = (Expected Future Valuation / Current Valuation)^(1/years) - 1
+        Priority Logic:
+        1. If valuation-based data exists → use valuation IRR (most reliable)
+        2. Else if pitch deck projections exist → use projection IRR
+        3. Else → None
+        
+        Formula: IRR = (Future Value / Current Value)^(1/years) - 1
         Returns as percentage. Pure calculation without risk adjustment.
-        
-        For pitch decks, use get_pitch_deck_projected_return() instead
         """
         try:
+            # Try valuation-based IRR first (most reliable)
             current_valuation = float(getattr(obj, 'current_valuation', 0) or 0)
             expected_future_valuation = float(getattr(obj, 'expected_future_valuation', 0) or 0)
             years_to_future_valuation = float(getattr(obj, 'years_to_future_valuation', 1) or 1)
@@ -550,39 +643,205 @@ class StartupSerializer(serializers.ModelSerializer):
                 irr = (math.pow(expected_future_valuation / current_valuation, 1 / years_to_future_valuation) - 1) * 100
                 return round(max(min(irr, 200), -100), 2)
             
+            # Fallback to pitch deck projection IRR
+            if obj.source_deck:
+                financial = obj.source_deck.financials.first()
+                if financial:
+                    deck_current_val = float(getattr(financial, 'current_valuation', 0) or 0)
+                    projected_revenue = float(getattr(financial, 'projected_revenue_final_year', 0) or 0)
+                    industry_multiple = float(getattr(financial, 'valuation_multiple', 0) or 0)
+                    years = int(getattr(financial, 'years_to_projection', 0) or 0)
+                    
+                    if deck_current_val > 0 and projected_revenue > 0 and industry_multiple > 0 and years > 0:
+                        future_valuation = projected_revenue * industry_multiple
+                        irr = (math.pow(future_valuation / deck_current_val, 1 / years) - 1) * 100
+                        return round(max(min(irr, 200), -100), 2)
+            
             return None
             
         except Exception as e:
             print(f"Projected return calculation error: {e}")
             return None
+        
+    def get_irr_source(self, obj):
+        """
+        Indicates which data source was used for the primary IRR calculation
+        Returns: 'valuation', 'projection', or None
+        """
+        try:
+            # Check if valuation-based data exists
+            current_valuation = float(getattr(obj, 'current_valuation', 0) or 0)
+            expected_future_valuation = float(getattr(obj, 'expected_future_valuation', 0) or 0)
+            years_to_future_valuation = float(getattr(obj, 'years_to_future_valuation', 1) or 1)
+            
+            if current_valuation > 0 and expected_future_valuation > 0 and years_to_future_valuation > 0:
+                return 'valuation'
+            
+            # Check if pitch deck projection data exists
+            if obj.source_deck:
+                financial = obj.source_deck.financials.first()
+                if financial:
+                    deck_current_val = float(getattr(financial, 'current_valuation', 0) or 0)
+                    projected_revenue = float(getattr(financial, 'projected_revenue_final_year', 0) or 0)
+                    industry_multiple = float(getattr(financial, 'valuation_multiple', 0) or 0)
+                    years = int(getattr(financial, 'years_to_projection', 0) or 0)
+                    
+                    if deck_current_val > 0 and projected_revenue > 0 and industry_multiple > 0 and years > 0:
+                        return 'projection'
+            
+            return None
+            
+        except Exception as e:
+            print(f"IRR source detection error: {e}")
+            return None
+    
+    def get_profile_completeness(self, obj):
+        """
+        Calculate profile completeness percentage (0-100)
+        
+        Scoring:
+        - Basics (20%): company_name, industry, description
+        - Deck sections (20%): problem, solution, market, team if source_deck exists
+        - Financials (30%): balance sheet, income statement, cash flow
+        - Projections/IRR (20%): either valuation or deck projection data
+        - Traction (10%): has views, comparisons, or watchlist activity
+        """
+        try:
+            score = 0
+            
+            # Basics (20%)
+            basics_score = 0
+            if obj.company_name and obj.company_name.strip():
+                basics_score += 7
+            if obj.industry and obj.industry.strip() and obj.industry != "—":
+                basics_score += 7
+            if obj.company_description and obj.company_description.strip():
+                basics_score += 6
+            score += basics_score
+            
+            # Deck sections (20%) - only if has source_deck
+            if obj.source_deck:
+                deck_score = 0
+                try:
+                    if hasattr(obj.source_deck, 'problem') and obj.source_deck.problem:
+                        deck_score += 5
+                except:
+                    pass
+                try:
+                    if hasattr(obj.source_deck, 'solution') and obj.source_deck.solution:
+                        deck_score += 5
+                except:
+                    pass
+                try:
+                    if hasattr(obj.source_deck, 'market_analysis') and obj.source_deck.market_analysis:
+                        deck_score += 5
+                except:
+                    pass
+                try:
+                    if obj.source_deck.team_members.exists():
+                        deck_score += 5
+                except:
+                    pass
+                score += deck_score
+            else:
+                # If no deck, give full 20% for having basic startup info
+                score += 20
+            
+            # Financials (30%)
+            financials_score = 0
+            if obj.total_assets and float(obj.total_assets) > 0:
+                financials_score += 5
+            if obj.total_liabilities and float(obj.total_liabilities) > 0:
+                financials_score += 5
+            if obj.current_assets and float(obj.current_assets) > 0:
+                financials_score += 5
+            if obj.current_liabilities and float(obj.current_liabilities) > 0:
+                financials_score += 5
+            if obj.revenue and float(obj.revenue) > 0:
+                financials_score += 5
+            if obj.net_income is not None:  # Can be negative
+                financials_score += 5
+            score += financials_score
+            
+            # Projections/IRR (20%)
+            projections_score = 0
+            # Check valuation-based projection
+            if (obj.current_valuation and float(obj.current_valuation) > 0 and
+                obj.expected_future_valuation and float(obj.expected_future_valuation) > 0 and
+                obj.years_to_future_valuation and float(obj.years_to_future_valuation) > 0):
+                projections_score = 20
+            # Or check deck-based projection
+            elif obj.source_deck:
+                try:
+                    financial = obj.source_deck.financials.first()
+                    if financial and all([
+                        financial.current_valuation and float(financial.current_valuation) > 0,
+                        financial.projected_revenue_final_year and float(financial.projected_revenue_final_year) > 0,
+                        financial.valuation_multiple and float(financial.valuation_multiple) > 0,
+                        financial.years_to_projection and int(financial.years_to_projection) > 0
+                    ]):
+                        projections_score = 20
+                except:
+                    pass
+            score += projections_score
+            
+            # Traction (10%)
+            traction_score = 0
+            try:
+                view_count = StartupView.objects.filter(startup=obj).count()
+                comparison_count = StartupComparison.objects.filter(startup=obj).count()
+                watchlist_count = Watchlist.objects.filter(startup=obj).count()
+                
+                if view_count > 0:
+                    traction_score += 3
+                if comparison_count > 0:
+                    traction_score += 4
+                if watchlist_count > 0:
+                    traction_score += 3
+            except:
+                pass
+            score += traction_score
+            
+            return min(score, 100)
+            
+        except Exception as e:
+            print(f"Profile completeness calculation error: {e}")
+            return 0
     
     def get_pitch_deck_projected_return(self, obj):
         """
-        Calculate IRR from financial projection data:
-        Future Valuation = Projected Revenue × Industry Multiple
-        IRR = (Future Valuation / Current Valuation)^(1/years) - 1
+        DEPRECATED: This is now the same as projected_return for deck-originated startups.
+        Kept for backward compatibility. Use projected_return instead.
+        
+        For startups created from pitch decks, the deck projection data is now
+        synced to the Startup's valuation fields (current_valuation, expected_future_valuation).
         """
         try:
-            if not obj.source_deck:
-                return None
-            
-            # Get the financial projection record (should only be one per deck)
-            financial = obj.source_deck.financials.first()
-            if not financial:
-                return None
-            
-            current_valuation = float(getattr(financial, 'current_valuation', 0) or 0)
-            projected_revenue = float(getattr(financial, 'projected_revenue_final_year', 0) or 0)
-            industry_multiple = float(getattr(financial, 'valuation_multiple', 0) or 0)
-            years_to_projection = int(getattr(financial, 'years_to_projection', 0) or 0)
-            
-            if current_valuation > 0 and projected_revenue > 0 and industry_multiple > 0 and years_to_projection > 0:
-                # Future Valuation = Projected Revenue × Industry Multiple
-                future_valuation = projected_revenue * industry_multiple
+            # Check if Startup fields are populated (they should be after sync)
+            if (obj.current_valuation and obj.expected_future_valuation and 
+                obj.years_to_future_valuation):
+                # Use unified calculation from Startup fields
+                current_val = float(obj.current_valuation)
+                expected_val = float(obj.expected_future_valuation)
+                years = float(obj.years_to_future_valuation)
                 
-                # IRR = (Future Valuation / Current Valuation)^(1/years) - 1
-                irr = (math.pow(future_valuation / current_valuation, 1 / years_to_projection) - 1) * 100
-                return round(max(min(irr, 200), -100), 2)
+                if current_val > 0 and expected_val > 0 and years > 0:
+                    irr = (math.pow(expected_val / current_val, 1 / years) - 1) * 100
+                    return round(max(min(irr, 200), -100), 2)
+            
+            # Fallback: Check deck financials if Startup fields not yet synced
+            if obj.source_deck:
+                financial = obj.source_deck.financials.first()
+                if financial:
+                    current_valuation = float(getattr(financial, 'current_valuation', 0) or 0)
+                    projected_revenue = float(getattr(financial, 'projected_revenue_final_year', 0) or 0)
+                    industry_multiple = float(getattr(financial, 'valuation_multiple', 0) or 0)
+                    years_to_projection = int(getattr(financial, 'years_to_projection', 0) or 0)
+                    
+                    if current_valuation > 0 and projected_revenue > 0 and industry_multiple > 0 and years_to_projection > 0:
+                        future_valuation = projected_revenue * industry_multiple
+                        irr = (math.pow(future_valuation / current_valuation, 1 / years_to_projection) - 1) * 100
+                        return round(max(min(irr, 200), -100), 2)
             
             return None
             

@@ -263,21 +263,20 @@ class deck_builder(APIView):
                     return Response({"error": "No active deck found"}, status=status.HTTP_400_BAD_REQUEST)
 
                 # Create Startup entry linked to Deck, if not already existing
-                from .models import Startup
                 if not Startup.objects.filter(source_deck_id=deck.id).exists():
                     market = getattr(deck, 'market_analysis', None)
-                    market_growth_rate = market.market_growth_rate if market and hasattr(market, 'market_growth_rate') else None
                     
                     Startup.objects.create(
+                        owner=RegisteredUser.objects.get(user=request.user),
                         company_name=getattr(deck, "company_name", "Untitled Deck"),
+                        tagline=getattr(deck, "tagline", ""),
+                        industry=market.primary_market if market else "—",
                         company_description=getattr(deck, "description", ""),
-                        industry=getattr(deck, "tagline", "—"),
                         data_source_confidence="Medium",
                         source_deck_id=deck.id,
-                        is_deck_builder=True,
+                        # Note: is_deck_builder is now deprecated - source_deck presence indicates origin
                         funding_ask=getattr(deck.ask, 'amount', None) if hasattr(deck, 'ask') else None,
-                        market_growth_rate=market_growth_rate,
-                        owner=RegisteredUser.objects.get(user=request.user)
+                        market_growth_rate=market.market_growth_rate if market else None,
                     )
 
             return Response(
@@ -449,14 +448,16 @@ class StartupListView(ListAPIView):
         params = self.request.query_params
 
         # ---- STARTUP TYPE FILTER ----
+        # Note: All startups are now unified. The presence of source_deck just indicates
+        # if they originated from a pitch deck, but they're all the same type now.
         startup_type = params.get('startup_type')
         if startup_type == 'pitch_deck':
-            # Only show pitch decks (source_deck is not null)
+            # Show startups that have pitch deck story/data
             qs = qs.filter(source_deck__isnull=False)
         elif startup_type == 'financial':
-            # Only show regular startups (source_deck is null)
+            # Show startups without pitch deck (direct financial entry)
             qs = qs.filter(source_deck__isnull=True)
-        # If no startup_type specified, show all
+        # Default: show all startups regardless of origin
 
         # ---- FILTERS ----
         
@@ -1913,10 +1914,7 @@ class compare_startups(APIView):
         if not user.is_authenticated:
             return Response({"error": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
 
-        startups = Startup.objects.select_related('owner__user', 'source_deck').filter(
-            source_deck__isnull=True, 
-            is_deck_builder=False
-        )
+        startups = Startup.objects.select_related('owner__user', 'source_deck').all()
         
         serializer = StartupSerializer(startups, many=True, context={'request': request})
         startup_data = serializer.data
@@ -2090,37 +2088,32 @@ class investment_simulation(APIView):
             serializer = StartupSerializer(selected_startup, context={'request': request})
             startup_data = serializer.data
             
-            is_pitch_deck = startup_data.get('is_deck_builder', False)
-
-            # Select correct IRR field based on startup type
-            if is_pitch_deck:
-                # Pitch Deck IRR: (Future Val / Current Val)^(1/years) - 1
-                # Where Future Val = Projected Revenue × Industry Multiple
-                projected_return = startup_data.get('pitch_deck_projected_return')
-                calculation_source = "pitch_deck_projected_return (IRR from revenue projections)"
-            else:
-                # Normal Startup IRR: (Expected Future Val / Current Val)^(1/years) - 1
-                # Uses explicit valuation fields
-                projected_return = startup_data.get('projected_return')
-                calculation_source = "projected_return (IRR from valuations)"
-
+            # Get unified projected return and its source
+            projected_return = startup_data.get('projected_return')
+            irr_source = startup_data.get('irr_source')  # 'valuation', 'projection', or None
             risk_level = startup_data.get('risk_level')
+            
+            # Determine calculation source for display
+            if irr_source == 'valuation':
+                calculation_source = "Valuation-based IRR (current → expected future valuation)"
+            elif irr_source == 'projection':
+                calculation_source = "Projection-based IRR (deck revenue projections)"
+            else:
+                calculation_source = "Unknown"
 
             if projected_return is None:
-                error_detail = (
-                    "This pitch deck does not have complete financial projections. "
-                    "Required: projected_revenue_final_year, valuation_multiple, current_valuation, years_to_projection"
-                    if is_pitch_deck else
-                    "This startup does not have complete valuation data. "
-                    "Required: current_valuation, expected_future_valuation, years_to_future_valuation"
-                )
                 return Response({
                     "error": "Insufficient financial data to run simulation",
-                    "detail": error_detail,
+                    "detail": (
+                        "This startup needs either:\n"
+                        "1. Complete valuation data (current valuation, expected future valuation, years to target), OR\n"
+                        "2. Complete pitch deck projections (current valuation, projected revenue, valuation multiple, projection years)"
+                    ),
                     "missing": {
-                        "is_pitch_deck": is_pitch_deck,
                         "has_projected_return": False,
-                        "has_risk_level": risk_level is not None
+                        "has_risk_level": risk_level is not None and risk_level != 'Data Pending',
+                        "irr_source": irr_source,
+                        "profile_completeness": startup_data.get('profile_completeness', 0)
                     }
                 }, status=400)
         else:
@@ -2131,22 +2124,27 @@ class investment_simulation(APIView):
 
         # Risk Multiplier: ONLY applied to normal startups
         # High = 0.50, Medium = 0.75, Low = 1.00
+        # Risk adjustment logic
+        # Only apply if we have a valid risk level (not 'Data Pending')
         risk_multipliers = {
             'Low': 1.00,
             'Medium': 0.75,
             'High': 0.50
         }
         
-        # Apply risk adjustment based on startup type
-        if is_pitch_deck:
+        # Check if risk data is available
+        has_risk_data = risk_level and risk_level != 'Data Pending'
+        
+        if has_risk_data:
+            # Apply risk adjustment based on Altman Z-Score
+            risk_multiplier = risk_multipliers.get(risk_level, 0.75)
+            risk_adjusted_return_percent = projected_return * risk_multiplier
+            risk_adjustment_applied = True
+        else:
+            # No risk adjustment possible - use base IRR
             risk_multiplier = 1.00
             risk_adjusted_return_percent = projected_return
             risk_adjustment_applied = False
-        else:
-            # Normal startups: Apply risk adjustment based on Altman Z-Score
-            risk_multiplier = risk_multipliers.get(risk_level, 0.75) if risk_level else 0.75
-            risk_adjusted_return_percent = projected_return * risk_multiplier
-            risk_adjustment_applied = True
         
         # Convert percentage to decimal
         growth_rate = risk_adjusted_return_percent / 100  
@@ -2189,7 +2187,7 @@ class investment_simulation(APIView):
 
         response_data = {
             "simulation_run": True,
-            "is_pitch_deck": is_pitch_deck,
+            "irr_source": irr_source,
             "investment_amount": round(investment_amount, 2),
             "duration_years": duration_years,
             "base_projected_return": round(projected_return, 2),
@@ -2201,7 +2199,7 @@ class investment_simulation(APIView):
             "roi_percentage": round(roi_percentage, 2),
             "yearly_breakdown": yearly_breakdown,
             "chart_data": chart_data,
-            "risk_level": risk_level if not is_pitch_deck else "N/A (Pitch Deck)",
+            "risk_level": risk_level if has_risk_data else "Data Pending",
             "risk_color": risk_color,
             "calculation_method": "IRR with Risk Adjustment" if risk_adjustment_applied else "IRR (No Risk Adjustment)",
             "calculation_source": calculation_source
@@ -2939,10 +2937,24 @@ class add_deck_to_recommended(APIView):
             # Industry
             industry = market.primary_market if market and market.primary_market else "Technology"
 
-            # Create startup
+            # Get financial projection data for unified IRR
+            financial = deck.financials.first()
+            current_val = None
+            expected_future_val = None
+            years_to_val = None
+
+            if financial:
+                current_val = float(financial.current_valuation) if financial.current_valuation else None
+                if (financial.projected_revenue_final_year and 
+                    financial.valuation_multiple and 
+                    current_val):
+                    expected_future_val = float(financial.projected_revenue_final_year) * float(financial.valuation_multiple)
+                    years_to_val = int(financial.years_to_projection) if financial.years_to_projection else None
+
             startup = Startup.objects.create(
                 owner=user,
                 company_name=deck.company_name,
+                tagline=deck.tagline,  # Now a direct field
                 industry=industry,
                 company_description=company_description,
                 data_source_confidence='High',
@@ -2951,13 +2963,15 @@ class add_deck_to_recommended(APIView):
                 net_income=total_profit,
                 funding_ask=funding_ask_amount,
                 source_deck=deck,
-                total_assets=None,
-                total_liabilities=None,
-                cash_flow=None,
-                team_strength=f"Team size: {deck.team_members.count()} members" if deck.team_members.exists() else "",
-                market_position=market.competitive_advantage if market and market.competitive_advantage else "",
+                # Sync financial projections for unified IRR calculation
+                current_valuation=current_val,
+                expected_future_valuation=expected_future_val,
+                years_to_future_valuation=years_to_val,
+                # Qualitative fields
+                team_strength=f"Team size: {deck.team_members.count()} members",
+                market_position=market.competitive_advantage if market else "",
                 brand_reputation=funding_ask_text,
-                is_deck_builder=True,
+                # Note: is_deck_builder removed - source_deck indicates origin
             )
 
             return Response({
@@ -3085,18 +3099,15 @@ class create_cover(APIView):
 
             serializer = DeckSerializer(deck, data=deck_data, partial=True)
             serializer.is_valid(raise_exception=True)
-            serializer.save()
+            deck = serializer.save()
+            
             # 🔄 Sync Startup if one is linked to this deck
-            Startup.objects.filter(source_deck=deck).update(
-                company_name=deck.company_name,
-                company_description=deck.tagline
-            )
-
-            return Response({
-                'success': True,
-                'message': 'Cover page updated successfully.',
-                'deck_id': deck.id
-            }, status=status.HTTP_200_OK)
+            startup = Startup.objects.filter(source_deck=deck).first()
+            if startup:
+                startup.company_name = deck.company_name
+                startup.company_description = deck.tagline or startup.company_description
+                startup.save()
+                print(f"✅ Synced cover page changes to Startup {startup.id}")
 
         except Deck.DoesNotExist:
             return Response({'error': 'Deck not found or unauthorized.'}, status=status.HTTP_404_NOT_FOUND)
@@ -3268,7 +3279,14 @@ class create_market_analysis(APIView):
                 partial=True
             )
             serializer.is_valid(raise_exception=True)
-            serializer.save()
+            market = serializer.save()
+            
+            #Sync industry to Startup
+            startup = Startup.objects.filter(source_deck=deck).first()
+            if startup and market.primary_market:
+                startup.industry = market.primary_market
+                startup.save()
+                print(f"Synced industry '{market.primary_market}' to Startup {startup.id}")
 
             return Response({
                 'success': True,
@@ -3413,6 +3431,21 @@ class create_financial(APIView):
                 projected_revenue_final_year=float(projected_revenue),
                 years_to_projection=int(years_to_projection)
             )
+            
+            # SYNC: Copy projection data to linked Startup for unified calculations
+            startup = Startup.objects.filter(source_deck=deck).first()
+            if startup:
+                # Calculate future valuation from projections: Revenue × Multiple
+                future_valuation = float(projected_revenue) * float(industry_multiple)
+                
+                # Update Startup with valuation-based IRR fields
+                startup.current_valuation = float(current_valuation)
+                startup.expected_future_valuation = future_valuation
+                startup.years_to_future_valuation = int(years_to_projection)
+                startup.save()
+                
+                print(f"Synced deck financials to Startup {startup.id}: "
+                      f"Current: {current_valuation}, Future: {future_valuation}, Years: {years_to_projection}")
 
             return Response({
                 'success': True,
@@ -3491,17 +3524,41 @@ class create_ask(APIView):
 
             if not Startup.objects.filter(source_deck=deck).exists():
                 market = getattr(deck, 'market_analysis', None)
+                
+                # Get financial projection if it exists
+                financial = deck.financials.first()
+                current_val = None
+                expected_future_val = None
+                years_to_val = None
+                
+                if financial:
+                    current_val = float(financial.current_valuation) if financial.current_valuation else None
+                    if (financial.projected_revenue_final_year and 
+                        financial.valuation_multiple and 
+                        current_val):
+                        # Future Valuation = Projected Revenue × Multiple
+                        expected_future_val = float(financial.projected_revenue_final_year) * float(financial.valuation_multiple)
+                        years_to_val = int(financial.years_to_projection) if financial.years_to_projection else None
+                
+                # Create unified startup with all available data
                 Startup.objects.create(
                     owner=owner,
                     company_name=deck.company_name,
-                    industry='—',
+                    tagline=deck.tagline,  # Now a direct field
+                    industry=market.primary_market if market and market.primary_market else '—',
                     company_description=deck.tagline or '',
                     data_source_confidence='Medium',
                     confidence_percentage=50,
                     funding_ask=serializer.instance.amount,
                     source_deck=deck,
-                    is_deck_builder=True,
-            )
+                    # Note: is_deck_builder removed - source_deck presence indicates origin
+                    # Sync financial projection data for unified IRR calculation
+                    current_valuation=current_val,
+                    expected_future_valuation=expected_future_val,
+                    years_to_future_valuation=years_to_val,
+                )
+                
+                print(f"Created unified Startup from Deck {deck.id} with financial projections")
 
             return Response({
                 'success': True,

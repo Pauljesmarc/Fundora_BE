@@ -30,7 +30,7 @@ class StartupRegistrationView(APIView):
 
 urlpatterns = [
 
-    path('index/', views.index.as_view(), name='index'),
+    path('index/', views.index, name='index'),
 
     path('startup/register/', views.startup_registration.as_view(), name='startup_registration'),
     path('startup/register/success/', views.registration_success, name='registration_success'),
